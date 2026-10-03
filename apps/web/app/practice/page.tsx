@@ -27,7 +27,7 @@ export default function PracticePage() {
     setResult(null);
     const res = await apiFetch<Generated>("/practice/generate", {
       method: "POST",
-      body: JSON.stringify({ mode, unit_code: "B10_DNA_REPLICATION", difficulty, question_types: types, question_count: count }),
+      body: JSON.stringify({ mode, unit_code: "B12_DNA_REPLICATION", difficulty, question_types: types, question_count: count }),
     });
     setGenerated(res); setAnswers({});
   };

@@ -30,7 +30,7 @@ export default function DashboardPage() {
         </div>
         <section className="hero-card">
           <div>
-            <span className="pill">Biology 10</span>
+            <span className="pill">Biology 12</span>
             <h2>{language === "vi" ? "Tiếp tục: Tái bản DNA" : "Continue: DNA replication"}</h2>
             <p>{language === "vi" ? "Một vertical slice hoàn chỉnh để kiểm thử POWER, Tutor và Practice." : "A complete vertical slice for testing POWER, Tutor and Practice."}</p>
             <Link className="button primary inline" href="/learn/dna-replication">{language === "vi" ? "Tiếp tục học" : "Continue learning"}</Link>

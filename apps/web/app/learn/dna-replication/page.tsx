@@ -23,7 +23,7 @@ export default function LearnPage() {
     if (powerId) return powerId;
     const res = await apiFetch<{ id: string }>("/power/sessions", {
       method: "POST",
-      body: JSON.stringify({ unit_code: "B10_DNA_REPLICATION", language }),
+      body: JSON.stringify({ unit_code: "B12_DNA_REPLICATION", language }),
     });
     setPowerId(res.id);
     return res.id;
@@ -56,7 +56,7 @@ export default function LearnPage() {
   return (
     <AuthGuard>
       <AppShell>
-        <div className="page-heading"><div><p className="eyebrow">Biology 10 · Nucleic acids</p><h1>{language === "vi" ? "Tái bản DNA" : "DNA replication"}</h1></div></div>
+        <div className="page-heading"><div><p className="eyebrow">Biology 12 · Molecular genetics</p><h1>{language === "vi" ? "Tái bản DNA" : "DNA replication"}</h1></div></div>
         <div className="power-stepper">
           {phases.map((p) => <div key={p} className={p === phase ? "power-step active" : "power-step"}>{p[0]}<span>{p}</span></div>)}
         </div>
