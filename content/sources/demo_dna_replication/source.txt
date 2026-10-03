@@ -1,0 +1,7 @@
+TÁI BẢN DNA — POWER DEMO CONTENT
+
+DNA gồm hai mạch polynucleotide ngược chiều. Khi DNA được tái bản, hai mạch tách nhau và mỗi mạch đóng vai trò khuôn cho việc tổng hợp một mạch mới. DNA polymerase chỉ kéo dài mạch DNA mới theo chiều 5′→3′.
+
+Tại chạc tái bản, sự ngược chiều của hai mạch khuôn dẫn đến hai cách tổng hợp khác nhau. Mạch dẫn đầu được tổng hợp liên tục theo hướng chạc tái bản mở ra. Mạch chậm được tổng hợp gián đoạn thành các đoạn DNA ngắn gọi là các đoạn Okazaki. Sau đó, các đoạn này được nối lại để tạo thành một mạch liên tục.
+
+Điểm cần phân biệt là cả mạch dẫn đầu và mạch chậm đều được tổng hợp theo chiều 5′→3′. Khác biệt nằm ở tính liên tục của quá trình tổng hợp. Việc hiểu chiều hoạt động của DNA polymerase giúp giải thích vì sao các đoạn Okazaki xuất hiện trên mạch chậm.

@@ -171,3 +171,15 @@ PDF files themselves should remain in private object storage and should not be c
 7. Add billing provider integration after entitlement logic is tested.
 
 See `docs/architecture/FOUNDATION.md` for architecture decisions.
+
+## v0.2 — Knowledge ingestion smoke test
+
+After applying migration `002_knowledge_ingestion.sql` and installing the updated API requirements, ingest the POWER-owned demo source from the repository root:
+
+```bat
+python scripts\ingest\ingest_source.py --manifest content\sources\demo_dna_replication\manifest.json
+```
+
+Then test authenticated retrieval at `POST /api/v1/retrieval/search` in Swagger (`http://localhost:8000/docs`). The v0.2 default embedding provider is `local_hash`: a zero-cost local development embedding used to verify pgvector plumbing. It will be replaced by a production semantic embedding provider later without changing the database contract.
+
+See `docs/architecture/KNOWLEDGE_INGESTION_V02.md` for the full workflow and private-PDF rules.

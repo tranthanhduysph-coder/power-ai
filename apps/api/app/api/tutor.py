@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import CurrentUser, get_current_user
 from app.db.session import get_db
+from app.retrieval.search import search_chunks
 from app.services.tutor import mock_tutor_blocks
 
 router = APIRouter(tags=["tutor"])
@@ -24,6 +25,15 @@ def tutor_respond(
     user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    # v0.2 keeps the tutor response itself mocked, but now runs real retrieval
+    # and returns provenance. v0.3 can feed the built context into a production LLM.
+    retrieved = search_chunks(
+        db,
+        payload.message,
+        concept_code=payload.concept_code,
+        language=payload.language,
+        top_k=4,
+    )
     blocks = mock_tutor_blocks(payload.language, payload.message)
     db.execute(
         text("""
@@ -32,8 +42,20 @@ def tutor_respond(
         """),
         {
             "user_id": user.id,
-            "metadata": __import__("json").dumps({"concept_code": payload.concept_code}),
+            "metadata": __import__("json").dumps(
+                {
+                    "concept_code": payload.concept_code,
+                    "retrieved_chunks": len(retrieved),
+                }
+            ),
         },
     )
     db.commit()
-    return {"provider": "mock", "blocks": blocks}
+    return {
+        "provider": "mock",
+        "blocks": blocks,
+        "retrieval": {
+            "count": len(retrieved),
+            "sources": [item.as_dict() for item in retrieved],
+        },
+    }

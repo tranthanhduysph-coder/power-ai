@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     firebase_auth_emulator_host: str | None = None
 
     ai_provider: str = "mock"
+    embedding_provider: str = "local_hash"
+    embedding_dimension: int = 1536
+    ingest_chunk_max_chars: int = 2400
+    ingest_chunk_overlap_chars: int = 250
+
     dev_user_email: str = "student@power.local"
     dev_user_name: str = "POWER Student"
 
