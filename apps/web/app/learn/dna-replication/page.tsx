@@ -52,6 +52,37 @@ type PrepareState = {
   };
 };
 
+type OrganizeConcept = {
+  code: string;
+  name: string;
+  description: string;
+  is_core: boolean;
+  mastery_score: number;
+};
+
+type OrganizeLink = {
+  source: string;
+  relation: string;
+  target: string;
+};
+
+type OrganizeBlueprint = {
+  unit_code: string;
+  concepts: OrganizeConcept[];
+  relation_options: { code: string; label: string }[];
+  minimum_anchor_concepts: number;
+  minimum_links: number;
+  synthesis_prompt: string;
+};
+
+type OrganizeState = {
+  anchor_concepts?: string[];
+  links?: OrganizeLink[];
+  synthesis?: string;
+  unique_concepts?: string[];
+  coverage?: number;
+};
+
 type PowerSession = {
   id: string;
   current_phase: Phase;
@@ -81,6 +112,7 @@ export default function LearnPage() {
   const { user, devMode, loading: authLoading } = useAuth();
   const [session, setSession] = useState<PowerSession | null>(null);
   const [blueprint, setBlueprint] = useState<PrepareBlueprint | null>(null);
+  const [organizeBlueprint, setOrganizeBlueprint] = useState<OrganizeBlueprint | null>(null);
   const [phase, setPhase] = useState<Phase>("PREPARE");
   const [goal, setGoal] = useState("");
   const [targetMinutes, setTargetMinutes] = useState(30);
@@ -88,7 +120,13 @@ export default function LearnPage() {
   const [priorKnowledge, setPriorKnowledge] = useState("");
   const [diagnosticAnswers, setDiagnosticAnswers] = useState<Record<string, string | boolean>>({});
   const [goalFeedback, setGoalFeedback] = useState<GoalFeedback | null>(null);
-  const [organizationNote, setOrganizationNote] = useState("");
+  const [anchorConcepts, setAnchorConcepts] = useState<string[]>([]);
+  const [organizeLinks, setOrganizeLinks] = useState<OrganizeLink[]>([
+    { source: "", relation: "", target: "" },
+    { source: "", relation: "", target: "" },
+    { source: "", relation: "", target: "" },
+  ]);
+  const [organizeSynthesis, setOrganizeSynthesis] = useState("");
   const [reflection, setReflection] = useState("");
   const [message, setMessage] = useState("");
   const [blocks, setBlocks] = useState<TutorBlock[]>([]);
@@ -104,8 +142,9 @@ export default function LearnPage() {
     const load = async () => {
       setSessionBusy(true);
       try {
-        const [bp, ps] = await Promise.all([
+        const [bp, obp, ps] = await Promise.all([
           apiFetch<PrepareBlueprint>(`/power/prepare/blueprint?unit_code=B12_DNA_REPLICATION&language=${language}`),
+          apiFetch<OrganizeBlueprint>(`/power/organize/blueprint?unit_code=B12_DNA_REPLICATION&language=${language}`),
           apiFetch<PowerSession>("/power/sessions", {
             method: "POST",
             body: JSON.stringify({ unit_code: "B12_DNA_REPLICATION", language }),
@@ -113,6 +152,7 @@ export default function LearnPage() {
         ]);
         if (cancelled) return;
         setBlueprint(bp);
+        setOrganizeBlueprint(obp);
         setSession(ps);
         setPhase(ps.current_phase);
         const saved = (ps.phases?.PREPARE?.state || {}) as PrepareState;
@@ -122,6 +162,14 @@ export default function LearnPage() {
         setPriorKnowledge(saved.prior_knowledge || "");
         setDiagnosticAnswers(saved.diagnostic_answers || {});
         setGoalFeedback(saved.goal_feedback || null);
+        const savedOrganize = (ps.phases?.ORGANIZE?.state || {}) as OrganizeState;
+        setAnchorConcepts(savedOrganize.anchor_concepts || []);
+        setOrganizeSynthesis(savedOrganize.synthesis || "");
+        const savedLinks = savedOrganize.links || [];
+        setOrganizeLinks(savedLinks.length >= 3 ? savedLinks : [
+          ...savedLinks,
+          ...Array.from({ length: 3 - savedLinks.length }, () => ({ source: "", relation: "", target: "" })),
+        ]);
       } catch (error) {
         if (!cancelled) setNotice(error instanceof Error ? error.message : "Unable to load POWER session");
       } finally {
@@ -136,6 +184,25 @@ export default function LearnPage() {
     if (!blueprint) return false;
     return blueprint.diagnostic_items.every((item) => diagnosticAnswers[item.code] !== undefined);
   }, [blueprint, diagnosticAnswers]);
+
+  const validOrganizeLinks = useMemo(
+    () => organizeLinks.filter((link) => link.source && link.relation && link.target && link.source !== link.target),
+    [organizeLinks],
+  );
+
+  const organizeCoverage = useMemo(() => {
+    const used = new Set(anchorConcepts);
+    validOrganizeLinks.forEach((link) => { used.add(link.source); used.add(link.target); });
+    const total = organizeBlueprint?.concepts.length || 0;
+    return { used: used.size, total, ratio: total ? used.size / total : 0 };
+  }, [anchorConcepts, validOrganizeLinks, organizeBlueprint]);
+
+  const organizeCanComplete = Boolean(
+    organizeBlueprint
+      && anchorConcepts.length >= organizeBlueprint.minimum_anchor_concepts
+      && validOrganizeLinks.length >= organizeBlueprint.minimum_links
+      && organizeSynthesis.trim().length >= 20,
+  );
 
   const getGoalFeedback = async () => {
     if (!goal.trim()) return;
@@ -175,6 +242,40 @@ export default function LearnPage() {
         : (language === "vi" ? "Đã lưu tiến trình Prepare." : "Prepare progress saved."));
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Unable to save Prepare");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleAnchorConcept = (code: string) => {
+    setAnchorConcepts((current) => current.includes(code) ? current.filter((item) => item !== code) : [...current, code]);
+  };
+
+  const updateOrganizeLink = (index: number, field: keyof OrganizeLink, value: string) => {
+    setOrganizeLinks((current) => current.map((link, i) => i === index ? { ...link, [field]: value } : link));
+  };
+
+  const saveOrganize = async (completed: boolean) => {
+    if (!session) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const result = await apiFetch<{ current_phase: Phase; organize: OrganizeState; session: PowerSession }>(`/power/sessions/${session.id}/organize`, {
+        method: "PUT",
+        body: JSON.stringify({
+          anchor_concepts: anchorConcepts,
+          links: validOrganizeLinks,
+          synthesis: organizeSynthesis,
+          completed,
+        }),
+      });
+      setSession(result.session);
+      setPhase(result.current_phase);
+      setNotice(completed
+        ? (language === "vi" ? "Organize đã hoàn thành. Bây giờ hãy làm việc sâu với kiến thức." : "Organize is complete. Now work deeply with the knowledge.")
+        : (language === "vi" ? "Đã lưu sơ đồ kiến thức của bạn." : "Your knowledge map has been saved."));
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to save Organize");
     } finally {
       setBusy(false);
     }
@@ -306,15 +407,88 @@ export default function LearnPage() {
   );
 
   const renderOrganize = () => (
-    <article className="lesson-card">
-      <p className="eyebrow">O · Organize</p>
-      <h2>{language === "vi" ? "Tổ chức kiến thức trước khi đi sâu" : "Organize the knowledge before going deeper"}</h2>
-      <p>{language === "vi" ? "Hãy nhìn bài như một hệ thống quan hệ: cấu trúc DNA → chiều hai mạch → hoạt động DNA polymerase → mạch dẫn đầu / mạch chậm → đoạn Okazaki." : "See the lesson as a relationship system: DNA structure → strand direction → DNA polymerase → leading / lagging strands → Okazaki fragments."}</p>
-      <div className="concept-map-lite">
-        <span>DNA structure</span><b>→</b><span>Antiparallel strands</span><b>→</b><span>5′→3′ polymerase</span><b>→</b><span>Leading / Lagging</span><b>→</b><span>Okazaki</span>
+    <article className="lesson-card organize-card">
+      <div className="phase-title-row">
+        <div>
+          <p className="eyebrow">O · Organize</p>
+          <h2>{language === "vi" ? "Tự xây cấu trúc kiến thức của bạn" : "Build your own knowledge structure"}</h2>
+        </div>
+        <span className="pill">{language === "vi" ? "Learner-built map" : "Learner-built map"}</span>
       </div>
-      <label className="field-block"><span>{language === "vi" ? "Theo bạn, mắt xích quan trọng nhất trong chuỗi trên là gì? Vì sao?" : "Which link in this chain seems most important to you, and why?"}</span><textarea value={organizationNote} onChange={(e) => setOrganizationNote(e.target.value)} /></label>
-      <button className="button primary inline" disabled={busy || !organizationNote.trim()} onClick={() => completeGenericPhase({ organization_note: organizationNote })}>{language === "vi" ? "Hoàn thành Organize →" : "Complete Organize →"}</button>
+      <p className="muted">{language === "vi"
+        ? "POWER không điền sẵn sơ đồ. Bạn chọn các khái niệm neo, nối chúng theo quan hệ mà bạn cho là có ý nghĩa, rồi giải thích một chuỗi bằng lời của chính mình."
+        : "POWER does not fill the map for you. Choose anchor concepts, connect them with meaningful relationships, then explain one chain in your own words."}</p>
+
+      <div className="prepare-section">
+        <div className="organize-heading-row">
+          <h3>1. {language === "vi" ? "Chọn các khái niệm neo" : "Choose anchor concepts"}</h3>
+          <span className="muted">{anchorConcepts.length}/{organizeBlueprint?.minimum_anchor_concepts || 3}+</span>
+        </div>
+        <div className="concept-bank">
+          {organizeBlueprint?.concepts.map((concept) => {
+            const selected = anchorConcepts.includes(concept.code);
+            return <button key={concept.code} type="button" className={selected ? "concept-card selected" : "concept-card"} onClick={() => toggleAnchorConcept(concept.code)}>
+              <strong>{concept.name}</strong>
+              <span>{concept.description}</span>
+              <small>{language === "vi" ? "Mastery hiện tại" : "Current mastery"}: {Math.round(concept.mastery_score * 100)}%</small>
+            </button>;
+          })}
+        </div>
+      </div>
+
+      <div className="prepare-section">
+        <div className="organize-heading-row">
+          <h3>2. {language === "vi" ? "Tạo các mối quan hệ" : "Create relationships"}</h3>
+          <span className="muted">{validOrganizeLinks.length}/{organizeBlueprint?.minimum_links || 3}+</span>
+        </div>
+        <p className="muted">{language === "vi" ? "Không cần cố đoán một sơ đồ duy nhất. Hãy thể hiện cách bạn đang tổ chức bài học." : "There is no single map to guess. Show how you are currently organizing the lesson."}</p>
+        <div className="relation-builder">
+          {organizeLinks.map((link, index) => <div className="relation-row" key={index}>
+            <select value={link.source} onChange={(e) => updateOrganizeLink(index, "source", e.target.value)}>
+              <option value="">{language === "vi" ? "Khái niệm A" : "Concept A"}</option>
+              {organizeBlueprint?.concepts.map((concept) => <option key={concept.code} value={concept.code}>{concept.name}</option>)}
+            </select>
+            <select value={link.relation} onChange={(e) => updateOrganizeLink(index, "relation", e.target.value)}>
+              <option value="">{language === "vi" ? "Quan hệ" : "Relationship"}</option>
+              {organizeBlueprint?.relation_options.map((option) => <option key={option.code} value={option.code}>{option.label}</option>)}
+            </select>
+            <select value={link.target} onChange={(e) => updateOrganizeLink(index, "target", e.target.value)}>
+              <option value="">{language === "vi" ? "Khái niệm B" : "Concept B"}</option>
+              {organizeBlueprint?.concepts.map((concept) => <option key={concept.code} value={concept.code}>{concept.name}</option>)}
+            </select>
+            {organizeLinks.length > 3 && <button type="button" className="relation-remove" onClick={() => setOrganizeLinks((current) => current.filter((_, i) => i !== index))}>×</button>}
+          </div>)}
+          <button type="button" className="button secondary inline" onClick={() => setOrganizeLinks((current) => [...current, { source: "", relation: "", target: "" }])}>{language === "vi" ? "+ Thêm quan hệ" : "+ Add relationship"}</button>
+        </div>
+      </div>
+
+      <div className="prepare-section">
+        <div className="organize-heading-row">
+          <h3>3. {language === "vi" ? "Xem lại bản đồ đang hình thành" : "Review your emerging map"}</h3>
+          <span className="pill">{language === "vi" ? `Bao phủ ${organizeCoverage.used}/${organizeCoverage.total} khái niệm` : `Covers ${organizeCoverage.used}/${organizeCoverage.total} concepts`}</span>
+        </div>
+        {validOrganizeLinks.length === 0 ? <div className="empty-map">{language === "vi" ? "Thêm ít nhất ba mối quan hệ để bản đồ bắt đầu hình thành." : "Add at least three relationships to start forming your map."}</div> : <div className="learner-map-preview">
+          {validOrganizeLinks.map((link, index) => {
+            const source = organizeBlueprint?.concepts.find((c) => c.code === link.source)?.name || link.source;
+            const target = organizeBlueprint?.concepts.find((c) => c.code === link.target)?.name || link.target;
+            const relation = organizeBlueprint?.relation_options.find((r) => r.code === link.relation)?.label || link.relation;
+            return <div className="map-link" key={`${link.source}-${link.relation}-${link.target}-${index}`}><strong>{source}</strong><span>{relation}</span><strong>{target}</strong></div>;
+          })}
+        </div>}
+      </div>
+
+      <div className="prepare-section">
+        <h3>4. {language === "vi" ? "Diễn đạt cấu trúc bằng lời của bạn" : "Express the structure in your own words"}</h3>
+        <label className="field-block">
+          <span>{organizeBlueprint?.synthesis_prompt || ""}</span>
+          <textarea value={organizeSynthesis} onChange={(e) => setOrganizeSynthesis(e.target.value)} placeholder={language === "vi" ? "Ví dụ: Vì hai mạch DNA ngược chiều... nên..." : "Example: Because the DNA strands are antiparallel... therefore..."} />
+        </label>
+      </div>
+
+      <div className="phase-actions">
+        <button className="button secondary" onClick={() => saveOrganize(false)} disabled={busy}>{language === "vi" ? "Lưu Organize" : "Save Organize"}</button>
+        <button className="button primary" onClick={() => saveOrganize(true)} disabled={busy || !organizeCanComplete}>{language === "vi" ? "Hoàn thành Organize →" : "Complete Organize →"}</button>
+      </div>
     </article>
   );
 

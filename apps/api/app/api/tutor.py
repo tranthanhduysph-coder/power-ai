@@ -37,10 +37,13 @@ def tutor_respond(
         row = db.execute(
             text("""
                 SELECT ps.current_phase, ps.learning_session_id,
-                       pps.state_json AS prepare_state
+                       pps.state_json AS prepare_state,
+                       current_state.state_json AS current_phase_state
                 FROM power_sessions ps
                 LEFT JOIN power_phase_state pps
                   ON pps.power_session_id = ps.id AND pps.phase = 'PREPARE'
+                LEFT JOIN power_phase_state current_state
+                  ON current_state.power_session_id = ps.id AND current_state.phase = ps.current_phase
                 WHERE ps.id = :id AND ps.user_id = :user_id
             """),
             {"id": payload.power_session_id, "user_id": user.id},
@@ -50,12 +53,20 @@ def tutor_respond(
         phase = payload.phase or row["current_phase"]
         learning_session_id = row["learning_session_id"]
         prepare_state = row["prepare_state"] or {}
+        current_phase_state = row["current_phase_state"] or {}
         learner_context = {
             "goal": prepare_state.get("goal"),
             "confidence": prepare_state.get("confidence"),
             "readiness": (prepare_state.get("diagnostic") or {}).get("readiness"),
             "weak_concepts": (prepare_state.get("diagnostic") or {}).get("weak_concepts", []),
         }
+        if phase == "ORGANIZE":
+            learner_context["organize_map"] = {
+                "anchor_concepts": current_phase_state.get("anchor_concepts", []),
+                "links": current_phase_state.get("links", []),
+                "synthesis": current_phase_state.get("synthesis", ""),
+                "coverage": current_phase_state.get("coverage"),
+            }
 
     retrieved = search_chunks(
         db,

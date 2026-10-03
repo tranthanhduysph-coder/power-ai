@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import CurrentUser, get_current_user
 from app.db.session import get_db
+from app.services.organize import get_organize_blueprint, get_unit_concepts, validate_organize_payload
 from app.services.prepare import analyze_goal, get_prepare_blueprint, score_diagnostic
 
 router = APIRouter(tags=["power"])
@@ -39,6 +40,19 @@ class PrepareUpdate(BaseModel):
     confidence: int = Field(default=3, ge=1, le=5)
     prior_knowledge: str = Field(default="", max_length=3000)
     diagnostic_answers: dict[str, Any] = Field(default_factory=dict)
+    completed: bool = False
+
+
+class OrganizeLink(BaseModel):
+    source: str
+    relation: str
+    target: str
+
+
+class OrganizeUpdate(BaseModel):
+    anchor_concepts: list[str] = Field(default_factory=list)
+    links: list[OrganizeLink] = Field(default_factory=list)
+    synthesis: str = Field(default="", max_length=5000)
     completed: bool = False
 
 
@@ -106,6 +120,19 @@ def prepare_blueprint(
         return get_prepare_blueprint(unit_code, language)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Prepare blueprint not found for this unit") from exc
+
+
+@router.get("/power/organize/blueprint")
+def organize_blueprint(
+    unit_code: str = Query(default="B12_DNA_REPLICATION"),
+    language: Literal["vi", "en"] = Query(default="vi"),
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        return get_organize_blueprint(db, unit_code, user.id, language)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Organize blueprint not found for this unit") from exc
 
 
 @router.post("/power/prepare/goal-feedback")
@@ -323,6 +350,110 @@ def update_prepare(
     return {
         "current_phase": "ORGANIZE" if payload.completed else "PREPARE",
         "prepare": state,
+        "session": _session_payload(db, session_id, user.id),
+    }
+
+
+@router.put("/power/sessions/{session_id}/organize")
+def update_organize(
+    session_id: UUID,
+    payload: OrganizeUpdate,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    owned = db.execute(
+        text("""
+            SELECT ps.learning_session_id, ps.current_phase, cu.code AS unit_code, ls.language
+            FROM power_sessions ps
+            JOIN learning_sessions ls ON ls.id = ps.learning_session_id
+            JOIN curriculum_units cu ON cu.id = ls.curriculum_unit_id
+            WHERE ps.id = :id AND ps.user_id = :user_id
+        """),
+        {"id": session_id, "user_id": user.id},
+    ).mappings().one_or_none()
+    if not owned:
+        raise HTTPException(status_code=404, detail="POWER session not found")
+
+    try:
+        concepts = get_unit_concepts(db, owned["unit_code"], user.id, owned["language"])
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Organize blueprint not found for this unit") from exc
+
+    validation = validate_organize_payload(
+        allowed_concepts={item["code"] for item in concepts},
+        anchors=payload.anchor_concepts,
+        links=[item.model_dump() for item in payload.links],
+        synthesis=payload.synthesis,
+        completed=payload.completed,
+    )
+    if validation.errors:
+        raise HTTPException(status_code=422, detail="; ".join(validation.errors))
+
+    state = {
+        "anchor_concepts": validation.anchors,
+        "links": validation.links,
+        "synthesis": validation.synthesis,
+        "unique_concepts": validation.unique_concepts,
+        "coverage": validation.coverage,
+    }
+
+    db.execute(
+        text("""
+            INSERT INTO power_phase_state(power_session_id, phase, state_json, completed_at)
+            VALUES (:session_id, 'ORGANIZE', CAST(:state AS jsonb), CASE WHEN :completed THEN now() ELSE NULL END)
+            ON CONFLICT (power_session_id, phase) DO UPDATE
+            SET state_json = EXCLUDED.state_json,
+                completed_at = CASE WHEN :completed THEN COALESCE(power_phase_state.completed_at, now()) ELSE power_phase_state.completed_at END,
+                updated_at = now()
+        """),
+        {
+            "session_id": session_id,
+            "state": json.dumps(state, ensure_ascii=False),
+            "completed": payload.completed,
+        },
+    )
+
+    if payload.completed:
+        db.execute(
+            text("UPDATE power_sessions SET current_phase = 'WORK', updated_at = now() WHERE id = :id"),
+            {"id": session_id},
+        )
+        db.execute(
+            text("UPDATE learning_sessions SET current_power_phase = 'WORK' WHERE id = :id"),
+            {"id": owned["learning_session_id"]},
+        )
+        db.execute(
+            text("""
+                INSERT INTO power_phase_state(power_session_id, phase, state_json)
+                VALUES (:id, 'WORK', '{}'::jsonb)
+                ON CONFLICT (power_session_id, phase) DO NOTHING
+            """),
+            {"id": session_id},
+        )
+
+    db.execute(
+        text("""
+            INSERT INTO learning_events(user_id, learning_session_id, event_type, payload)
+            VALUES (:user_id, :learning_session_id, :event_type, CAST(:payload AS jsonb))
+        """),
+        {
+            "user_id": user.id,
+            "learning_session_id": owned["learning_session_id"],
+            "event_type": "organize_completed" if payload.completed else "organize_saved",
+            "payload": json.dumps(
+                {
+                    "anchors": len(validation.anchors),
+                    "links": len(validation.links),
+                    "coverage": validation.coverage,
+                    "completed": payload.completed,
+                }
+            ),
+        },
+    )
+    db.commit()
+    return {
+        "current_phase": "WORK" if payload.completed else "ORGANIZE",
+        "organize": state,
         "session": _session_payload(db, session_id, user.id),
     }
 

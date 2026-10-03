@@ -85,7 +85,7 @@ def grounded_tutor_blocks(
         )
         phase_rule = {
             "PREPARE": "The learner is in PREPARE. Clarify prior knowledge and goals; avoid doing the whole lesson for them. Give at most one short explanation, then ask one focused readiness question.",
-            "ORGANIZE": "The learner is in ORGANIZE. Emphasize relationships, categories, sequences, comparisons, and concept-map structure rather than a long lecture.",
+            "ORGANIZE": "The learner is in ORGANIZE. Use the learner's current organize_map when available. Ask them to justify or refine one relationship at a time; emphasize relationships, categories, sequences, and comparisons. Do not replace their map with a complete ready-made map unless explicitly requested after they have attempted one.",
             "WORK": "The learner is in WORK. Explain and scaffold the biology clearly, using examples and a brief check-for-understanding when useful.",
             "EVALUATE": "The learner is in EVALUATE. Do not simply reveal answers to an active assessment. Give hints, criteria, or feedback on reasoning instead.",
             "RETHINK": "The learner is in RETHINK. Help the learner identify why an error happened, articulate the corrected idea, and state one concrete adjustment for next time.",
@@ -97,7 +97,7 @@ def grounded_tutor_blocks(
         )
         phase_rule = {
             "PREPARE": "Người học đang ở PREPARE. Hãy làm rõ kiến thức nền và mục tiêu; không giảng thay toàn bộ bài. Chỉ giải thích rất ngắn khi cần rồi đặt một câu hỏi kiểm tra sẵn sàng học tập.",
-            "ORGANIZE": "Người học đang ở ORGANIZE. Ưu tiên quan hệ khái niệm, phân loại, trình tự, so sánh và cấu trúc sơ đồ thay vì giảng dài.",
+            "ORGANIZE": "Người học đang ở ORGANIZE. Nếu learner_context có organize_map, hãy bám vào bản đồ do chính người học đang xây. Yêu cầu họ giải thích hoặc tinh chỉnh từng quan hệ; ưu tiên quan hệ khái niệm, phân loại, trình tự và so sánh. Không thay người học bằng một sơ đồ hoàn chỉnh có sẵn trừ khi họ đã thử xây và chủ động yêu cầu xem mẫu tham khảo.",
             "WORK": "Người học đang ở WORK. Giải thích và scaffold kiến thức Sinh học rõ ràng, có thể dùng ví dụ và một câu kiểm tra hiểu biết ngắn.",
             "EVALUATE": "Người học đang ở EVALUATE. Không đưa thẳng đáp án cho một bài đánh giá đang làm; hãy gợi ý, nêu tiêu chí hoặc phản hồi vào lập luận.",
             "RETHINK": "Người học đang ở RETHINK. Giúp xác định vì sao sai, phát biểu lại ý đúng và nêu một điều chỉnh cụ thể cho lần học tiếp theo.",
