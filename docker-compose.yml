@@ -1,0 +1,64 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: power-ai-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-power_ai}
+      POSTGRES_USER: ${POSTGRES_USER:-power_ai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-power_ai_local}
+    ports:
+      - "5432:5432"
+    volumes:
+      - power_ai_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-power_ai} -d ${POSTGRES_DB:-power_ai}"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: power-ai-api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-power_ai}:${POSTGRES_PASSWORD:-power_ai_local}@db:5432/${POSTGRES_DB:-power_ai}
+      CORS_ORIGINS: http://localhost:3000
+      AUTH_MODE: ${AUTH_MODE:-firebase}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-demo-power-ai}
+      FIREBASE_AUTH_EMULATOR_HOST: host.docker.internal:9099
+      AI_PROVIDER: ${AI_PROVIDER:-mock}
+      DEV_USER_EMAIL: ${DEV_USER_EMAIL:-student@power.local}
+      DEV_USER_NAME: ${DEV_USER_NAME:-POWER Student}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    container_name: power-ai-web
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+      NEXT_PUBLIC_AUTH_MODE: ${NEXT_PUBLIC_AUTH_MODE:-firebase}
+      NEXT_PUBLIC_USE_FIREBASE_EMULATOR: ${NEXT_PUBLIC_USE_FIREBASE_EMULATOR:-true}
+      NEXT_PUBLIC_FIREBASE_AUTH_EMULATOR_URL: http://127.0.0.1:9099
+      NEXT_PUBLIC_FIREBASE_API_KEY: ${NEXT_PUBLIC_FIREBASE_API_KEY:-demo-key}
+      NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ${NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN:-demo-power-ai.firebaseapp.com}
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${NEXT_PUBLIC_FIREBASE_PROJECT_ID:-demo-power-ai}
+      NEXT_PUBLIC_FIREBASE_APP_ID: ${NEXT_PUBLIC_FIREBASE_APP_ID:-1:123456789:web:demo}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  power_ai_pgdata:
