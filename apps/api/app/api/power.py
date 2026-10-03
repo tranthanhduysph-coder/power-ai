@@ -19,6 +19,7 @@ PHASES = ["PREPARE", "ORGANIZE", "WORK", "EVALUATE", "RETHINK"]
 class StartPowerSession(BaseModel):
     unit_code: str = "B12_DNA_REPLICATION"
     language: Literal["vi", "en"] = "vi"
+    force_new: bool = False
 
 
 class PhaseUpdate(BaseModel):
@@ -172,6 +173,29 @@ def active_power_session(
     return {"session": _session_payload(db, session_id, user.id)}
 
 
+@router.get("/power/sessions/history")
+def power_session_history(
+    unit_code: str = Query(default="B12_DNA_REPLICATION"),
+    limit: int = Query(default=10, ge=1, le=25),
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ids = db.execute(
+        text("""
+            SELECT ps.id
+            FROM power_sessions ps
+            JOIN learning_sessions ls ON ls.id = ps.learning_session_id
+            JOIN curriculum_units cu ON cu.id = ls.curriculum_unit_id
+            WHERE ps.user_id = :user_id
+              AND cu.code = :unit_code
+            ORDER BY COALESCE(ls.ended_at, ps.updated_at) DESC, ps.created_at DESC
+            LIMIT :limit
+        """),
+        {"user_id": user.id, "unit_code": unit_code, "limit": limit},
+    ).scalars().all()
+    return {"sessions": [_session_payload(db, session_id, user.id) for session_id in ids]}
+
+
 @router.get("/power/sessions/{session_id}")
 def get_power_session(
     session_id: UUID,
@@ -208,6 +232,27 @@ def start_power_session(
     ).scalar_one_or_none()
     if existing_id:
         return {**_session_payload(db, existing_id, user.id), "resumed": True}
+
+    if not payload.force_new:
+        latest_completed_id = db.execute(
+            text("""
+                SELECT ps.id
+                FROM power_sessions ps
+                JOIN learning_sessions ls ON ls.id = ps.learning_session_id
+                WHERE ps.user_id = :user_id
+                  AND ls.curriculum_unit_id = :unit_id
+                  AND ls.status = 'completed'
+                ORDER BY COALESCE(ls.ended_at, ps.updated_at) DESC
+                LIMIT 1
+            """),
+            {"user_id": user.id, "unit_id": unit_id},
+        ).scalar_one_or_none()
+        if latest_completed_id:
+            return {
+                **_session_payload(db, latest_completed_id, user.id),
+                "resumed": True,
+                "cycle_completed": True,
+            }
 
     learning_session_id = db.execute(
         text("""
@@ -258,7 +303,7 @@ def update_prepare(
 ):
     owned = db.execute(
         text("""
-            SELECT ps.learning_session_id, cu.code AS unit_code, ls.language
+            SELECT ps.learning_session_id, ps.current_phase, cu.code AS unit_code, ls.language
             FROM power_sessions ps
             JOIN learning_sessions ls ON ls.id = ps.learning_session_id
             JOIN curriculum_units cu ON cu.id = ls.curriculum_unit_id
@@ -309,7 +354,9 @@ def update_prepare(
         },
     )
 
-    if payload.completed:
+    current_phase = owned["current_phase"]
+    if payload.completed and current_phase == "PREPARE":
+        current_phase = "ORGANIZE"
         db.execute(
             text("UPDATE power_sessions SET current_phase = 'ORGANIZE', updated_at = now() WHERE id = :id"),
             {"id": session_id},
@@ -348,7 +395,7 @@ def update_prepare(
     )
     db.commit()
     return {
-        "current_phase": "ORGANIZE" if payload.completed else "PREPARE",
+        "current_phase": current_phase,
         "prepare": state,
         "session": _session_payload(db, session_id, user.id),
     }
@@ -413,7 +460,9 @@ def update_organize(
         },
     )
 
-    if payload.completed:
+    current_phase = owned["current_phase"]
+    if payload.completed and current_phase == "ORGANIZE":
+        current_phase = "WORK"
         db.execute(
             text("UPDATE power_sessions SET current_phase = 'WORK', updated_at = now() WHERE id = :id"),
             {"id": session_id},
@@ -452,7 +501,7 @@ def update_organize(
     )
     db.commit()
     return {
-        "current_phase": "WORK" if payload.completed else "ORGANIZE",
+        "current_phase": current_phase,
         "organize": state,
         "session": _session_payload(db, session_id, user.id),
     }

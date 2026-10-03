@@ -87,6 +87,8 @@ type PowerSession = {
   id: string;
   current_phase: Phase;
   status: string;
+  created_at?: string;
+  updated_at?: string;
   unit: { code: string; name_vi: string; name_en: string };
   phases: Partial<Record<Phase, { state: Record<string, unknown>; completed_at: string | null }>>;
   resumed?: boolean;
@@ -114,6 +116,8 @@ export default function LearnPage() {
   const [blueprint, setBlueprint] = useState<PrepareBlueprint | null>(null);
   const [organizeBlueprint, setOrganizeBlueprint] = useState<OrganizeBlueprint | null>(null);
   const [phase, setPhase] = useState<Phase>("PREPARE");
+  const [viewPhase, setViewPhase] = useState<Phase>("PREPARE");
+  const [sessionHistory, setSessionHistory] = useState<PowerSession[]>([]);
   const [goal, setGoal] = useState("");
   const [targetMinutes, setTargetMinutes] = useState(30);
   const [confidence, setConfidence] = useState(3);
@@ -136,6 +140,32 @@ export default function LearnPage() {
   const [tutorProvider, setTutorProvider] = useState<string | null>(null);
   const [retrievalCount, setRetrievalCount] = useState<number | null>(null);
 
+  const hydratePowerSession = (ps: PowerSession) => {
+    setSession(ps);
+    setPhase(ps.current_phase);
+    setViewPhase(ps.current_phase);
+    const saved = (ps.phases?.PREPARE?.state || {}) as PrepareState;
+    setGoal(saved.goal || "");
+    setTargetMinutes(saved.target_minutes || 30);
+    setConfidence(saved.confidence || 3);
+    setPriorKnowledge(saved.prior_knowledge || "");
+    setDiagnosticAnswers(saved.diagnostic_answers || {});
+    setGoalFeedback(saved.goal_feedback || null);
+    const savedOrganize = (ps.phases?.ORGANIZE?.state || {}) as OrganizeState;
+    setAnchorConcepts(savedOrganize.anchor_concepts || []);
+    setOrganizeSynthesis(savedOrganize.synthesis || "");
+    const savedLinks = savedOrganize.links || [];
+    setOrganizeLinks(savedLinks.length >= 3 ? savedLinks : [
+      ...savedLinks,
+      ...Array.from({ length: 3 - savedLinks.length }, () => ({ source: "", relation: "", target: "" })),
+    ]);
+    const rethinkState = (ps.phases?.RETHINK?.state || {}) as { reflection?: string };
+    setReflection(rethinkState.reflection || "");
+    setBlocks([]);
+    setTutorProvider(null);
+    setRetrievalCount(null);
+  };
+
   useEffect(() => {
     if (authLoading || (!devMode && !user)) return;
     let cancelled = false;
@@ -153,23 +183,9 @@ export default function LearnPage() {
         if (cancelled) return;
         setBlueprint(bp);
         setOrganizeBlueprint(obp);
-        setSession(ps);
-        setPhase(ps.current_phase);
-        const saved = (ps.phases?.PREPARE?.state || {}) as PrepareState;
-        setGoal(saved.goal || "");
-        setTargetMinutes(saved.target_minutes || 30);
-        setConfidence(saved.confidence || 3);
-        setPriorKnowledge(saved.prior_knowledge || "");
-        setDiagnosticAnswers(saved.diagnostic_answers || {});
-        setGoalFeedback(saved.goal_feedback || null);
-        const savedOrganize = (ps.phases?.ORGANIZE?.state || {}) as OrganizeState;
-        setAnchorConcepts(savedOrganize.anchor_concepts || []);
-        setOrganizeSynthesis(savedOrganize.synthesis || "");
-        const savedLinks = savedOrganize.links || [];
-        setOrganizeLinks(savedLinks.length >= 3 ? savedLinks : [
-          ...savedLinks,
-          ...Array.from({ length: 3 - savedLinks.length }, () => ({ source: "", relation: "", target: "" })),
-        ]);
+        hydratePowerSession(ps);
+        const history = await apiFetch<{ sessions: PowerSession[] }>("/power/sessions/history?unit_code=B12_DNA_REPLICATION&limit=10");
+        if (!cancelled) setSessionHistory(history.sessions);
       } catch (error) {
         if (!cancelled) setNotice(error instanceof Error ? error.message : "Unable to load POWER session");
       } finally {
@@ -237,6 +253,7 @@ export default function LearnPage() {
       setGoalFeedback(result.prepare.goal_feedback || null);
       setSession(result.session);
       setPhase(result.current_phase);
+      if (completed && phase === "PREPARE") setViewPhase(result.current_phase);
       setNotice(completed
         ? (language === "vi" ? "Prepare đã hoàn thành. Bây giờ hãy tổ chức kiến thức." : "Prepare is complete. Now organize the knowledge.")
         : (language === "vi" ? "Đã lưu tiến trình Prepare." : "Prepare progress saved."));
@@ -271,6 +288,7 @@ export default function LearnPage() {
       });
       setSession(result.session);
       setPhase(result.current_phase);
+      if (completed && phase === "ORGANIZE") setViewPhase(result.current_phase);
       setNotice(completed
         ? (language === "vi" ? "Organize đã hoàn thành. Bây giờ hãy làm việc sâu với kiến thức." : "Organize is complete. Now work deeply with the knowledge.")
         : (language === "vi" ? "Đã lưu sơ đồ kiến thức của bạn." : "Your knowledge map has been saved."));
@@ -288,13 +306,14 @@ export default function LearnPage() {
     try {
       const result = await apiFetch<{ current_phase: Phase; cycle_completed: boolean; session: PowerSession }>(`/power/sessions/${session.id}/phase`, {
         method: "PUT",
-        body: JSON.stringify({ phase, state, completed: true }),
+        body: JSON.stringify({ phase: viewPhase, state, completed: true }),
       });
       setSession(result.session);
       setPhase(result.current_phase);
+      setViewPhase(result.current_phase);
       setNotice(result.cycle_completed
-        ? (language === "vi" ? "Bạn đã hoàn thành một chu trình POWER." : "You completed a POWER cycle.")
-        : (language === "vi" ? `Đã hoàn thành ${phase}.` : `${phase} completed.`));
+        ? (language === "vi" ? "Bạn đã hoàn thành một chu trình POWER. Bạn vẫn có thể mở lại từng pha để xem và chỉnh sửa." : "You completed a POWER cycle. You can still reopen each phase to review or edit it.")
+        : (language === "vi" ? `Đã hoàn thành ${viewPhase}.` : `${viewPhase} completed.`));
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Unable to update POWER phase");
     } finally {
@@ -313,7 +332,7 @@ export default function LearnPage() {
           message,
           language,
           power_session_id: session.id,
-          phase,
+          phase: viewPhase,
         }),
       });
       setBlocks(res.blocks);
@@ -321,6 +340,53 @@ export default function LearnPage() {
       setRetrievalCount(res.retrieval?.count ?? 0);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const openPhase = (target: Phase) => {
+    if (!session?.phases?.[target] && target !== phase) return;
+    setViewPhase(target);
+    setBlocks([]);
+    setTutorProvider(null);
+    setRetrievalCount(null);
+    setNotice(target === phase
+      ? null
+      : (language === "vi" ? `Bạn đang xem lại pha ${target}. Tiến trình hiện tại vẫn ở ${phase}.` : `You are reviewing ${target}. Your current progression remains at ${phase}.`));
+  };
+
+  const startNewCycle = async () => {
+    if (!session || session.status !== "completed") return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const ps = await apiFetch<PowerSession>("/power/sessions", {
+        method: "POST",
+        body: JSON.stringify({ unit_code: "B12_DNA_REPLICATION", language, force_new: true }),
+      });
+      hydratePowerSession(ps);
+      const history = await apiFetch<{ sessions: PowerSession[] }>("/power/sessions/history?unit_code=B12_DNA_REPLICATION&limit=10");
+      setSessionHistory(history.sessions);
+      setNotice(language === "vi" ? "Đã bắt đầu một chu trình POWER mới từ Prepare." : "Started a new POWER cycle from Prepare.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to start a new POWER cycle");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const switchSession = async (sessionId: string) => {
+    if (!sessionId || sessionId === session?.id) return;
+    setSessionBusy(true);
+    try {
+      const ps = await apiFetch<PowerSession>(`/power/sessions/${sessionId}`);
+      hydratePowerSession(ps);
+      setNotice(ps.status === "completed"
+        ? (language === "vi" ? "Đang xem một chu trình POWER đã hoàn thành." : "Viewing a completed POWER cycle.")
+        : null);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to open POWER cycle");
+    } finally {
+      setSessionBusy(false);
     }
   };
 
@@ -400,8 +466,9 @@ export default function LearnPage() {
       </div>
 
       <div className="phase-actions">
-        <button className="button secondary" onClick={() => savePrepare(false)} disabled={busy || !goal.trim()}>{language === "vi" ? "Lưu Prepare" : "Save Prepare"}</button>
-        <button className="button primary" onClick={() => savePrepare(true)} disabled={busy || !goal.trim() || !diagnosticComplete}>{language === "vi" ? "Hoàn thành Prepare →" : "Complete Prepare →"}</button>
+        <button className="button secondary" onClick={() => savePrepare(false)} disabled={busy || !goal.trim()}>{phaseDone("PREPARE") ? (language === "vi" ? "Lưu thay đổi Prepare" : "Save Prepare changes") : (language === "vi" ? "Lưu Prepare" : "Save Prepare")}</button>
+        {!phaseDone("PREPARE") && phase === "PREPARE" && <button className="button primary" onClick={() => savePrepare(true)} disabled={busy || !goal.trim() || !diagnosticComplete}>{language === "vi" ? "Hoàn thành Prepare →" : "Complete Prepare →"}</button>}
+        {viewPhase !== phase && <button className="button primary" onClick={() => setViewPhase(phase)}>{language === "vi" ? `Trở lại ${phase}` : `Back to ${phase}`}</button>}
       </div>
     </article>
   );
@@ -486,8 +553,9 @@ export default function LearnPage() {
       </div>
 
       <div className="phase-actions">
-        <button className="button secondary" onClick={() => saveOrganize(false)} disabled={busy}>{language === "vi" ? "Lưu Organize" : "Save Organize"}</button>
-        <button className="button primary" onClick={() => saveOrganize(true)} disabled={busy || !organizeCanComplete}>{language === "vi" ? "Hoàn thành Organize →" : "Complete Organize →"}</button>
+        <button className="button secondary" onClick={() => saveOrganize(false)} disabled={busy}>{phaseDone("ORGANIZE") ? (language === "vi" ? "Lưu thay đổi Organize" : "Save Organize changes") : (language === "vi" ? "Lưu Organize" : "Save Organize")}</button>
+        {!phaseDone("ORGANIZE") && phase === "ORGANIZE" && <button className="button primary" onClick={() => saveOrganize(true)} disabled={busy || !organizeCanComplete}>{language === "vi" ? "Hoàn thành Organize →" : "Complete Organize →"}</button>}
+        {viewPhase !== phase && <button className="button primary" onClick={() => setViewPhase(phase)}>{language === "vi" ? `Trở lại ${phase}` : `Back to ${phase}`}</button>}
       </div>
     </article>
   );
@@ -499,7 +567,7 @@ export default function LearnPage() {
       <p>{language === "vi" ? "Hai mạch DNA ngược chiều nhau. DNA polymerase chỉ kéo dài mạch mới theo chiều 5′→3′. Vì vậy tại một chạc tái bản, một mạch mới có thể được tổng hợp liên tục, trong khi mạch còn lại phải tạo thành các đoạn ngắn rồi nối lại." : "The two DNA templates are antiparallel. DNA polymerase extends new DNA only 5′→3′. At a replication fork, one new strand can therefore be synthesized continuously while the other must be synthesized as short segments that are later joined."}</p>
       <div className="concept-visual"><div>5′ ─────────────── 3′</div><div className="fork-line">↘ {language === "vi" ? "Mạch dẫn đầu" : "Leading strand"}</div><div className="fork-line">↗ {language === "vi" ? "Mạch chậm · Okazaki" : "Lagging strand · Okazaki"}</div><div>3′ ─────────────── 5′</div></div>
       <p className="muted">{language === "vi" ? "Hãy dùng Tutor ở bên phải để hỏi, yêu cầu ví dụ hoặc tự kiểm tra cách hiểu của bạn." : "Use the Tutor on the right to ask, request an example, or check your own explanation."}</p>
-      <button className="button primary inline" disabled={busy} onClick={() => completeGenericPhase({ work_completed: true })}>{language === "vi" ? "Tôi đã xử lý nội dung chính →" : "I worked through the core content →"}</button>
+      {!phaseDone("WORK") && phase === "WORK" ? <button className="button primary inline" disabled={busy} onClick={() => completeGenericPhase({ work_completed: true })}>{language === "vi" ? "Tôi đã xử lý nội dung chính →" : "I worked through the core content →"}</button> : <span className="pill">{language === "vi" ? "Đã hoàn thành Work" : "Work completed"}</span>}
     </article>
   );
 
@@ -509,7 +577,7 @@ export default function LearnPage() {
       <h2>{language === "vi" ? "Thu bằng chứng về mức độ hiểu" : "Collect evidence of understanding"}</h2>
       <p>{language === "vi" ? "Evaluate không chỉ cho điểm. Hãy làm một bộ luyện tập để POWER ghi nhận câu đúng, câu sai và mức độ làm chủ từng khái niệm." : "Evaluate is more than a score. Complete a practice set so POWER can record correct/incorrect responses and concept mastery."}</p>
       <Link className="button primary inline" href="/practice">{language === "vi" ? "Mở Practice" : "Open Practice"}</Link>
-      <button className="button secondary inline evaluate-complete" disabled={busy} onClick={() => completeGenericPhase({ practice_reviewed: true })}>{language === "vi" ? "Tôi đã hoàn thành và xem phản hồi →" : "I completed practice and reviewed feedback →"}</button>
+      {!phaseDone("EVALUATE") && phase === "EVALUATE" ? <button className="button secondary inline evaluate-complete" disabled={busy} onClick={() => completeGenericPhase({ practice_reviewed: true })}>{language === "vi" ? "Tôi đã hoàn thành và xem phản hồi →" : "I completed practice and reviewed feedback →"}</button> : <span className="pill">{language === "vi" ? "Đã hoàn thành Evaluate" : "Evaluate completed"}</span>}
     </article>
   );
 
@@ -519,39 +587,52 @@ export default function LearnPage() {
       <h2>{language === "vi" ? "Nhìn lại để điều chỉnh lần học tiếp theo" : "Reflect and adjust the next learning cycle"}</h2>
       <p>{language === "vi" ? "Không chỉ ghi 'đúng/sai'. Hãy chỉ ra điều bạn đã hiểu rõ hơn, một lỗi hoặc điểm còn mơ hồ, và cách bạn sẽ điều chỉnh." : "Do not stop at right/wrong. State what became clearer, one error or uncertainty, and how you will adjust."}</p>
       <label className="field-block"><span>{language === "vi" ? "Phản tư của bạn" : "Your reflection"}</span><textarea value={reflection} onChange={(e) => setReflection(e.target.value)} placeholder={language === "vi" ? "Tôi từng nghĩ..., sau khi học tôi nhận ra..., lần tới tôi sẽ..." : "I used to think..., now I realize..., next time I will..."} /></label>
-      <button className="button primary inline" disabled={busy || reflection.trim().length < 10} onClick={() => completeGenericPhase({ reflection })}>{language === "vi" ? "Hoàn thành chu trình POWER" : "Complete POWER cycle"}</button>
+      {!phaseDone("RETHINK") && phase === "RETHINK" ? <button className="button primary inline" disabled={busy || reflection.trim().length < 10} onClick={() => completeGenericPhase({ reflection })}>{language === "vi" ? "Hoàn thành chu trình POWER" : "Complete POWER cycle"}</button> : <span className="pill">{language === "vi" ? "Chu trình đã hoàn thành" : "Cycle completed"}</span>}
     </article>
   );
 
-  const quickActions = phase === "PREPARE"
+  const quickActions = viewPhase === "PREPARE"
     ? [language === "vi" ? "Hỏi tôi một câu kiến thức nền" : "Ask me one prior-knowledge question", language === "vi" ? "Giúp tôi làm rõ mục tiêu" : "Help clarify my goal"]
-    : phase === "ORGANIZE"
+    : viewPhase === "ORGANIZE"
       ? [language === "vi" ? "Gợi ý quan hệ giữa các khái niệm" : "Suggest concept relationships", language === "vi" ? "Cho tôi một bảng so sánh" : "Give me a comparison table"]
-      : phase === "RETHINK"
+      : viewPhase === "RETHINK"
         ? [language === "vi" ? "Giúp tôi tìm nguyên nhân sai" : "Help identify why I was wrong", language === "vi" ? "Hỏi tôi một câu phản tư" : "Ask me a reflection question"]
         : [language === "vi" ? "Giải thích đơn giản hơn" : "Explain more simply", language === "vi" ? "So sánh hai mạch" : "Compare the two strands", language === "vi" ? "Kiểm tra tôi" : "Quiz me"];
 
   return (
     <AuthGuard>
       <AppShell>
-        <div className="page-heading"><div><p className="eyebrow">Biology 12 · POWER learning cycle</p><h1>{language === "vi" ? "DNA và cơ chế tái bản DNA" : "DNA and DNA replication"}</h1></div>{session?.resumed && <span className="pill">{language === "vi" ? "Đã tiếp tục phiên trước" : "Resumed previous session"}</span>}</div>
-        <div className="power-stepper">
-          {phases.map((p) => <div key={p} className={["power-step", p === phase ? "active" : "", phaseDone(p) ? "done" : ""].filter(Boolean).join(" ")}>{phaseDone(p) ? "✓" : p[0]}<span>{p}</span></div>)}
+        <div className="page-heading">
+          <div><p className="eyebrow">Biology 12 · POWER learning cycle</p><h1>{language === "vi" ? "DNA và cơ chế tái bản DNA" : "DNA and DNA replication"}</h1></div>
+          <div className="cycle-controls">
+            {sessionHistory.length > 1 && <select aria-label={language === "vi" ? "Chọn chu trình POWER" : "Choose POWER cycle"} value={session?.id || ""} onChange={(e) => switchSession(e.target.value)}>
+              {sessionHistory.map((item, index) => <option key={item.id} value={item.id}>{language === "vi" ? `Chu trình ${sessionHistory.length - index}` : `Cycle ${sessionHistory.length - index}`} · {item.status === "completed" ? (language === "vi" ? "đã hoàn thành" : "completed") : (language === "vi" ? "đang học" : "active")}</option>)}
+            </select>}
+            {session?.status === "completed" && <button className="button secondary inline" disabled={busy} onClick={startNewCycle}>{language === "vi" ? "Bắt đầu chu trình mới" : "Start new cycle"}</button>}
+          </div>
         </div>
+        <div className="power-stepper">
+          {phases.map((p) => {
+            const available = Boolean(session?.phases?.[p]) || p === phase;
+            return <button type="button" key={p} disabled={!available} onClick={() => openPhase(p)} className={["power-step", p === viewPhase ? "active" : "", p === phase ? "current" : "", phaseDone(p) ? "done" : ""].filter(Boolean).join(" ")}>{phaseDone(p) ? "✓" : p[0]}<span>{p}</span></button>;
+          })}
+        </div>
+        {viewPhase !== phase && <div className="review-banner">{language === "vi" ? `Chế độ xem lại: ${viewPhase}. Pha tiến trình hiện tại là ${phase}; việc xem lại không làm lùi tiến trình.` : `Review mode: ${viewPhase}. Current progression is ${phase}; reviewing does not move progress backward.`}</div>}
+        {session?.status === "completed" && <div className="review-banner complete-cycle">{language === "vi" ? "Chu trình này đã hoàn thành. Bạn có thể bấm P–O–W–E–R để xem lại từng pha, chỉnh sửa Prepare/Organize, hoặc bắt đầu một chu trình mới." : "This cycle is complete. Use P–O–W–E–R to review each phase, edit Prepare/Organize, or start a new cycle."}</div>}
         {notice && <div className="notice-banner">{notice}</div>}
         {sessionBusy ? <div className="card loading-card">{language === "vi" ? "Đang mở phiên POWER…" : "Opening POWER session…"}</div> : <div className="lesson-layout">
-          {phase === "PREPARE" && renderPrepare()}
-          {phase === "ORGANIZE" && renderOrganize()}
-          {phase === "WORK" && renderWork()}
-          {phase === "EVALUATE" && renderEvaluate()}
-          {phase === "RETHINK" && renderRethink()}
+          {viewPhase === "PREPARE" && renderPrepare()}
+          {viewPhase === "ORGANIZE" && renderOrganize()}
+          {viewPhase === "WORK" && renderWork()}
+          {viewPhase === "EVALUATE" && renderEvaluate()}
+          {viewPhase === "RETHINK" && renderRethink()}
           <aside className="tutor-card">
-            <div className="tutor-header"><div><span className="pill">POWER Tutor · {phase}</span><h3>{language === "vi" ? "Hỗ trợ đúng pha học tập" : "Phase-aware learning support"}</h3></div></div>
+            <div className="tutor-header"><div><span className="pill">POWER Tutor · {viewPhase}</span><h3>{language === "vi" ? "Hỗ trợ đúng pha học tập" : "Phase-aware learning support"}</h3></div></div>
             {tutorProvider && <div><span className="pill">{tutorProvider === "openai" ? "OpenAI" : "Mock"}</span> <span className="muted">{language === "vi" ? `Retrieval: ${retrievalCount ?? 0} đoạn` : `Retrieval: ${retrievalCount ?? 0} chunks`}</span></div>}
             {tutorProvider === "mock" && <p className="muted">{language === "vi" ? "Tutor đang chạy mock mode. Hãy dùng AI_PROVIDER=openai để kiểm thử Tutor thật." : "Tutor is running in mock mode. Use AI_PROVIDER=openai to test the real Tutor."}</p>}
             <div className="quick-actions">{quickActions.map((x) => <button key={x} onClick={() => setMessage(x)}>{x}</button>)}</div>
             {blocks.length > 0 && <TutorRenderer blocks={blocks} />}
-            <div className="tutor-input"><textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder={language === "vi" ? `Hỏi POWER trong pha ${phase}…` : `Ask POWER during ${phase}…`} /><button className="button primary" disabled={busy || !session} onClick={askTutor}>{busy ? "…" : (language === "vi" ? "Gửi" : "Send")}</button></div>
+            <div className="tutor-input"><textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder={language === "vi" ? `Hỏi POWER trong pha ${viewPhase}…` : `Ask POWER during ${viewPhase}…`} /><button className="button primary" disabled={busy || !session} onClick={askTutor}>{busy ? "…" : (language === "vi" ? "Gửi" : "Send")}</button></div>
           </aside>
         </div>}
       </AppShell>

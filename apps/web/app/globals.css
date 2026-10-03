@@ -225,3 +225,61 @@ th, td { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; }
   .map-link { grid-template-columns: 1fr; }
   .map-link span::before { content: "↓ "; }
 }
+
+/* POWER v0.5.1: phase review + cycle history */
+.power-step {
+  appearance: none;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.power-step:disabled {
+  cursor: not-allowed;
+  opacity: .45;
+}
+.power-step.current {
+  box-shadow: inset 0 0 0 2px rgba(26, 115, 68, .18);
+}
+.power-step.active {
+  outline: 2px solid rgba(26, 115, 68, .18);
+  outline-offset: 1px;
+}
+.cycle-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.cycle-controls select {
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+  padding: 0 10px;
+  color: var(--text);
+}
+.review-banner {
+  margin: -6px 0 16px;
+  padding: 10px 13px;
+  border: 1px solid #d5c98c;
+  border-radius: 12px;
+  background: #fff9df;
+  color: #66591e;
+  font-size: 14px;
+}
+.review-banner.complete-cycle {
+  border-color: #a8ceb8;
+  background: #eef8f2;
+  color: #275b3d;
+}
+@media (max-width: 760px) {
+  .cycle-controls {
+    justify-content: flex-start;
+    width: 100%;
+  }
+  .cycle-controls select {
+    max-width: 100%;
+  }
+}
