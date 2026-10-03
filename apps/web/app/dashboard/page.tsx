@@ -1,41 +1,91 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { AuthGuard } from "@/components/auth-guard";
 import { useLanguage } from "@/components/language-provider";
 import { useAuth } from "@/components/auth-provider";
 import { apiFetch } from "@/lib/api";
 
+type Progress = {
+  concepts: any[];
+  summary: {
+    completed_sets: number;
+    mean_accuracy: number;
+    latest_accuracy: number | null;
+    latest_completed_at: string | null;
+  };
+  active_cycle: null | {
+    id: string;
+    current_phase: "PREPARE" | "ORGANIZE" | "WORK" | "EVALUATE" | "RETHINK";
+    unit_code: string;
+    name_vi: string;
+    name_en: string;
+    updated_at: string;
+  };
+};
+
 export default function DashboardPage() {
   const { language } = useLanguage();
   const { user, devMode, loading } = useAuth();
   const [me, setMe] = useState<any>(null);
-  const [progress, setProgress] = useState<any>(null);
+  const [progress, setProgress] = useState<Progress | null>(null);
 
-  useEffect(() => {
+  const loadDashboard = useCallback(async () => {
     if (loading || (!devMode && !user)) return;
-    Promise.all([apiFetch<any>("/me"), apiFetch<any>("/progress")])
-      .then(([m, p]) => { setMe(m); setProgress(p); })
-      .catch(console.error);
+    const [m, p] = await Promise.all([
+      apiFetch<any>("/me"),
+      apiFetch<Progress>("/progress"),
+    ]);
+    setMe(m);
+    setProgress(p);
   }, [user, devMode, loading]);
 
-  const accuracy = progress ? Math.round(progress.summary.mean_accuracy * 100) : 0;
+  useEffect(() => {
+    loadDashboard().catch(console.error);
+
+    const refresh = () => loadDashboard().catch(console.error);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [loadDashboard]);
+
+  const latestAccuracy = progress?.summary.latest_accuracy;
+  const latestPercent = latestAccuracy == null ? 0 : Math.round(latestAccuracy * 100);
+  const meanPercent = progress ? Math.round(progress.summary.mean_accuracy * 100) : 0;
+
   return (
     <AuthGuard>
       <AppShell>
         <div className="page-heading">
-          <div><p className="eyebrow">POWER Biology</p><h1>{language === "vi" ? `Chào ${me?.display_name || "bạn"}` : `Welcome ${me?.display_name || "back"}`}</h1></div>
+          <div>
+            <p className="eyebrow">POWER Biology</p>
+            <h1>{language === "vi" ? `Chào ${me?.display_name || "bạn"}` : `Welcome ${me?.display_name || "back"}`}</h1>
+          </div>
         </div>
         <section className="hero-card">
           <div>
-            <span className="pill">Biology 12</span>
-            <h2>{language === "vi" ? "Tiếp tục: Tái bản DNA" : "Continue: DNA replication"}</h2>
-            <p>{language === "vi" ? "Một vertical slice hoàn chỉnh để kiểm thử POWER, Tutor và Practice." : "A complete vertical slice for testing POWER, Tutor and Practice."}</p>
+            <span className="pill">Biology 12 · {progress?.active_cycle?.current_phase ?? "PREPARE"}</span>
+            <h2>{progress?.active_cycle ? (language === "vi" ? `Tiếp tục: ${progress.active_cycle.name_vi}` : `Continue: ${progress.active_cycle.name_en}`) : (language === "vi" ? "Bắt đầu: DNA và cơ chế tái bản DNA" : "Start: DNA and DNA replication")}</h2>
+            <p>{language === "vi" ? "POWER ghi nhớ bạn đang ở pha nào và tiếp tục đúng vị trí trong chu trình học." : "POWER remembers your current phase and resumes the learning cycle at the right place."}</p>
             <Link className="button primary inline" href="/learn/dna-replication">{language === "vi" ? "Tiếp tục học" : "Continue learning"}</Link>
           </div>
-          <div className="hero-score"><strong>{accuracy}%</strong><span>{language === "vi" ? "Độ chính xác luyện tập" : "Practice accuracy"}</span></div>
+          <div className="hero-score">
+            <strong>{latestPercent}%</strong>
+            <span>
+              {language === "vi"
+                ? `Kết quả gần nhất · TB ${meanPercent}%`
+                : `Latest result · Avg ${meanPercent}%`}
+            </span>
+          </div>
         </section>
         <div className="grid-3">
           <div className="stat-card"><span>{language === "vi" ? "Bộ đề hoàn thành" : "Completed sets"}</span><strong>{progress?.summary.completed_sets ?? 0}</strong></div>
