@@ -18,10 +18,12 @@ class RetrievalResult:
     section_title: str | None
     page_start: int | None
     page_end: int | None
+    printed_page_label: str | None
     language: str
     text: str
     score: float
     concept_codes: list[str]
+    visuals: list[dict[str, Any]]
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -31,10 +33,12 @@ class RetrievalResult:
             "section_title": self.section_title,
             "page_start": self.page_start,
             "page_end": self.page_end,
+            "printed_page_label": self.printed_page_label,
             "language": self.language,
             "text": self.text,
             "score": round(self.score, 5),
             "concept_codes": self.concept_codes,
+            "visuals": self.visuals,
         }
 
 
@@ -83,6 +87,7 @@ def search_chunks(
             cc.page_end,
             cc.language,
             cc.text_content,
+            cc.metadata_json,
             1 - (cc.embedding <=> CAST(:embedding AS vector)) AS score,
             COALESCE(
                 array_agg(DISTINCT mapped_concept.code)
@@ -110,18 +115,27 @@ def search_chunks(
         params["source_codes"] = source_codes
 
     rows = db.execute(sql, params).mappings().all()
-    return [
-        RetrievalResult(
-            chunk_id=row["chunk_id"],
-            source_code=row["source_code"],
-            source_title=row["source_title"],
-            section_title=row["section_title"],
-            page_start=row["page_start"],
-            page_end=row["page_end"],
-            language=row["language"],
-            text=row["text_content"],
-            score=float(row["score"] or 0.0),
-            concept_codes=list(row["concept_codes"] or []),
+    results: list[RetrievalResult] = []
+    for row in rows:
+        metadata = row["metadata_json"] or {}
+        if isinstance(metadata, str):
+            import json
+
+            metadata = json.loads(metadata)
+        results.append(
+            RetrievalResult(
+                chunk_id=row["chunk_id"],
+                source_code=row["source_code"],
+                source_title=row["source_title"],
+                section_title=row["section_title"],
+                page_start=row["page_start"],
+                page_end=row["page_end"],
+                printed_page_label=metadata.get("printed_page_label"),
+                language=row["language"],
+                text=row["text_content"],
+                score=float(row["score"] or 0.0),
+                concept_codes=list(row["concept_codes"] or []),
+                visuals=list(metadata.get("visuals") or []),
+            )
         )
-        for row in rows
-    ]
+    return results

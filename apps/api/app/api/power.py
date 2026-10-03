@@ -14,7 +14,7 @@ PHASES = ["PREPARE", "ORGANIZE", "WORK", "EVALUATE", "RETHINK"]
 
 
 class StartPowerSession(BaseModel):
-    unit_code: str = "B10_DNA_REPLICATION"
+    unit_code: str = "B12_DNA_REPLICATION"
     language: Literal["vi", "en"] = "vi"
 
 

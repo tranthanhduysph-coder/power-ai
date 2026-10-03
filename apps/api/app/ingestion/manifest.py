@@ -7,7 +7,10 @@ from app.ingestion.models import IngestionManifest, SectionSpec, SourceSpec
 
 
 def project_root() -> Path:
-    # .../apps/api/app/ingestion/manifest.py -> repository root
+    # Host development layout: <repo>/apps/api/app/ingestion/manifest.py
+    # API container layout: /app/app/ingestion/manifest.py
+    if Path("/app/database").exists() and Path("/app/app").exists():
+        return Path("/app")
     return Path(__file__).resolve().parents[4]
 
 
@@ -16,8 +19,6 @@ def _resolve_document_path(manifest_path: Path, raw_path: str) -> Path:
     if candidate.is_absolute():
         return candidate
 
-    # First resolve from repository root because private_sources/ is expected
-    # to live there. If it does not exist, allow a manifest-relative path.
     root_candidate = project_root() / candidate
     if root_candidate.exists():
         return root_candidate

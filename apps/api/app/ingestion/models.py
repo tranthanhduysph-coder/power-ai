@@ -9,6 +9,12 @@ from typing import Any
 class DocumentPage:
     number: int
     text: str
+    printed_page_label: str | None = None
+    extraction_method: str = "native_text"
+    extraction_provider: str | None = None
+    extraction_model: str | None = None
+    visuals: list[dict[str, Any]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

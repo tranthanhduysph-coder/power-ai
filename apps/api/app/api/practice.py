@@ -16,7 +16,7 @@ router = APIRouter(tags=["practice"])
 
 class GeneratePractice(BaseModel):
     mode: Literal["custom", "adaptive"] = "custom"
-    unit_code: str = "B10_DNA_REPLICATION"
+    unit_code: str = "B12_DNA_REPLICATION"
     difficulty: Literal["auto", "easy", "medium", "hard"] = "auto"
     question_types: list[Literal["mcq", "true_false", "short_answer"]] = Field(
         default_factory=lambda: ["mcq", "true_false", "short_answer"]

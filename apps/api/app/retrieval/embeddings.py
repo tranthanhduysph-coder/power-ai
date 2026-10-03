@@ -4,8 +4,10 @@ import hashlib
 import math
 import re
 import unicodedata
-from dataclasses import dataclass
-from typing import Protocol
+from dataclasses import dataclass, field
+from typing import Any, Protocol
+
+from app.core.config import get_settings
 
 _TOKEN = re.compile(r"\w+", flags=re.UNICODE)
 
@@ -20,12 +22,7 @@ class EmbeddingProvider(Protocol):
 
 @dataclass(slots=True)
 class LocalHashEmbeddingProvider:
-    """Zero-cost deterministic lexical embedding for local development.
-
-    It is intentionally not a production semantic model. It proves the full
-    pgvector ingestion/retrieval path without API keys or model downloads.
-    Replacing it later does not change the database or retrieval contracts.
-    """
+    """Zero-cost deterministic lexical embedding for local plumbing tests."""
 
     dimension: int = 1536
     name: str = "local_hash"
@@ -38,7 +35,6 @@ class LocalHashEmbeddingProvider:
         if not tokens:
             return vector
 
-        # Include unigrams and adjacent bigrams to preserve some phrase signal.
         features = tokens + [f"{a}::{b}" for a, b in zip(tokens, tokens[1:])]
         for feature in features:
             digest = hashlib.blake2b(feature.encode("utf-8"), digest_size=16).digest()
@@ -52,13 +48,37 @@ class LocalHashEmbeddingProvider:
         return vector
 
 
+@dataclass(slots=True)
+class OpenAIEmbeddingProvider:
+    dimension: int = 1536
+    name: str = "openai"
+    model: str = "text-embedding-3-small"
+    _client: Any = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        from openai import OpenAI
+
+        settings = get_settings()
+        if not settings.openai_api_key:
+            raise RuntimeError("OPENAI_API_KEY is required when EMBEDDING_PROVIDER=openai")
+        self._client = OpenAI(api_key=settings.openai_api_key)
+        self.model = settings.embedding_model
+
+    def embed(self, text: str) -> list[float]:
+        response = self._client.embeddings.create(
+            model=self.model,
+            input=text,
+            dimensions=self.dimension,
+        )
+        return list(response.data[0].embedding)
+
+
 def get_embedding_provider(provider: str = "local_hash", dimension: int = 1536) -> EmbeddingProvider:
     if provider == "local_hash":
         return LocalHashEmbeddingProvider(dimension=dimension)
-    raise ValueError(
-        f"Unsupported embedding provider '{provider}'. "
-        "v0.2 ships with local_hash; add a production provider behind this interface later."
-    )
+    if provider == "openai":
+        return OpenAIEmbeddingProvider(dimension=dimension)
+    raise ValueError(f"Unsupported embedding provider '{provider}'")
 
 
 def vector_literal(values: list[float]) -> str:

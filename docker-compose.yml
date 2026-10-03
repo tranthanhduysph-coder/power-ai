@@ -29,11 +29,21 @@ services:
       AUTH_MODE: ${AUTH_MODE:-firebase}
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-demo-power-ai}
       FIREBASE_AUTH_EMULATOR_HOST: host.docker.internal:9099
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       AI_PROVIDER: ${AI_PROVIDER:-mock}
+      TUTOR_MODEL: ${TUTOR_MODEL:-gpt-5.6-luna}
+      VISION_PROVIDER: ${VISION_PROVIDER:-disabled}
+      VISION_MODEL: ${VISION_MODEL:-gpt-5.6-luna}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local_hash}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-1536}
       DEV_USER_EMAIL: ${DEV_USER_EMAIL:-student@power.local}
       DEV_USER_NAME: ${DEV_USER_NAME:-POWER Student}
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    volumes:
+      - ./private_sources:/app/private_sources:ro
+      - ./storage:/app/storage
     ports:
       - "8000:8000"
     depends_on:

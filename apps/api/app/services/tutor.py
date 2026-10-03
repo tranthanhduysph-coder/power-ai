@@ -1,4 +1,8 @@
+from __future__ import annotations
+
 from typing import Any
+
+from app.core.config import get_settings
 
 
 DNA_OVERVIEW = {
@@ -39,21 +43,61 @@ def mock_tutor_blocks(language: str, message: str) -> list[dict[str, Any]]:
 
     return [
         {"type": "text", "content": text},
-        {
-            "type": "diagram",
-            "title": "DNA replication fork",
-            "nodes": [
-                {"id": "fork", "label": "Replication fork" if lang == "en" else "Chạc tái bản"},
-                {"id": "leading", "label": "Leading strand" if lang == "en" else "Mạch dẫn đầu"},
-                {"id": "lagging", "label": "Lagging strand" if lang == "en" else "Mạch chậm"},
-                {"id": "okazaki", "label": "Okazaki fragments" if lang == "en" else "Các đoạn Okazaki"},
-            ],
-            "edges": [
-                {"from": "fork", "to": "leading"},
-                {"from": "fork", "to": "lagging"},
-                {"from": "lagging", "to": "okazaki"},
-            ],
-        },
         {"type": "table", **table},
         {"type": "checkpoint", "prompt": prompt},
     ]
+
+
+def grounded_tutor_blocks(
+    *,
+    language: str,
+    message: str,
+    retrieved: list[Any],
+) -> tuple[str, list[dict[str, Any]]]:
+    settings = get_settings()
+    if settings.ai_provider != "openai":
+        return "mock", mock_tutor_blocks(language, message)
+    if not settings.openai_api_key:
+        raise RuntimeError("OPENAI_API_KEY is required when AI_PROVIDER=openai")
+
+    context_parts: list[str] = []
+    for item in retrieved:
+        page = (
+            f"{item.page_start}"
+            if item.page_start == item.page_end or item.page_end is None
+            else f"{item.page_start}-{item.page_end}"
+        )
+        printed = item.printed_page_label or ""
+        context_parts.append(
+            f"SOURCE={item.source_code}; TITLE={item.source_title}; PDF_PAGE={page}; PRINTED_PAGE={printed}; SECTION={item.section_title or ''}\n{item.text}"
+        )
+    context = "\n\n---\n\n".join(context_parts)
+
+    if language == "en":
+        instruction = (
+            "Answer the learner in English using only the supplied textbook context. "
+            "If the context is insufficient, say that the source currently available is insufficient. "
+            "Be concise, pedagogically clear, and do not invent citations."
+        )
+    else:
+        instruction = (
+            "Trả lời người học bằng tiếng Việt, chỉ dựa trên ngữ cảnh SGK/tài liệu được cung cấp. "
+            "Nếu ngữ cảnh chưa đủ, nói rõ nguồn hiện có chưa đủ. "
+            "Giải thích ngắn gọn, dễ học và không tự tạo trích dẫn."
+        )
+
+    from openai import OpenAI
+
+    client = OpenAI(api_key=settings.openai_api_key)
+    response = client.responses.create(
+        model=settings.tutor_model,
+        input=[
+            {
+                "role": "user",
+                "content": (
+                    f"{instruction}\n\nLEARNER QUESTION:\n{message}\n\nSOURCE CONTEXT:\n{context}"
+                ),
+            }
+        ],
+    )
+    return "openai", [{"type": "text", "content": response.output_text.strip()}]
