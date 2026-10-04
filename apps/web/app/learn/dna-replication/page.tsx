@@ -107,6 +107,27 @@ type WorkState = {
   completion_ratio?: number;
 };
 
+type EvaluateConcept = {
+  concept_code: string;
+  name_vi: string;
+  name_en: string;
+  correct: number;
+  total: number;
+  accuracy: number;
+  mastery: number;
+};
+
+type EvaluateState = {
+  practice_set_id?: string;
+  practice_attempt_id?: string;
+  accuracy?: number;
+  correct?: number;
+  total?: number;
+  concepts?: EvaluateConcept[];
+  weak_concepts?: string[];
+  evidence_ready?: boolean;
+};
+
 type PowerSession = {
   id: string;
   current_phase: Phase;
@@ -688,15 +709,36 @@ export default function LearnPage() {
     </article>
   );
 
-  const renderEvaluate = () => (
-    <article className="lesson-card">
-      <p className="eyebrow">E · Evaluate</p>
-      <h2>{language === "vi" ? "Thu bằng chứng về mức độ hiểu" : "Collect evidence of understanding"}</h2>
-      <p>{language === "vi" ? "Evaluate không chỉ cho điểm. Hãy làm một bộ luyện tập để POWER ghi nhận câu đúng, câu sai và mức độ làm chủ từng khái niệm." : "Evaluate is more than a score. Complete a practice set so POWER can record correct/incorrect responses and concept mastery."}</p>
-      <Link className="button primary inline" href="/practice">{language === "vi" ? "Mở Practice" : "Open Practice"}</Link>
-      {!phaseDone("EVALUATE") && phase === "EVALUATE" ? <button className="button secondary inline evaluate-complete" disabled={busy} onClick={() => completeGenericPhase({ practice_reviewed: true })}>{language === "vi" ? "Tôi đã hoàn thành và xem phản hồi →" : "I completed practice and reviewed feedback →"}</button> : <span className="pill">{language === "vi" ? "Đã hoàn thành Evaluate" : "Evaluate completed"}</span>}
-    </article>
-  );
+  const renderEvaluate = () => {
+    const evaluate = (session?.phases?.EVALUATE?.state || {}) as EvaluateState;
+    const hasEvidence = Boolean(session?.phases?.EVALUATE?.completed_at && evaluate.evidence_ready);
+    const accuracyPercent = Math.round((evaluate.accuracy || 0) * 100);
+
+    return (
+      <article className="lesson-card evaluate-phase-card">
+        <p className="eyebrow">E · Evaluate</p>
+        <h2>{language === "vi" ? "Thu bằng chứng thật về mức độ hiểu" : "Collect real evidence of understanding"}</h2>
+        {!hasEvidence ? <>
+          <p>{language === "vi" ? "Evaluate không được hoàn thành bằng một nút xác nhận thủ công. POWER sẽ tạo bộ đánh giá, lưu từng câu trả lời vào database, cập nhật mastery theo khái niệm và tự chuyển sang Rethink sau khi bạn nộp bài." : "Evaluate cannot be completed with a manual confirmation. POWER will create an evaluation set, store each response in the database, update concept mastery, and automatically move to Rethink after submission."}</p>
+          {phase === "EVALUATE" ? <Link className="button primary inline" href={session ? `/practice?purpose=evaluate&powerSessionId=${session.id}` : "/practice"}>{language === "vi" ? "Bắt đầu Evaluate →" : "Start Evaluate →"}</Link> : <div className="review-banner">{language === "vi" ? "Bạn đang xem lại Evaluate nhưng chu trình hiện không ở pha Evaluate." : "You are reviewing Evaluate, but the cycle is not currently in Evaluate."}</div>}
+        </> : <>
+          <div className="evaluate-summary-grid">
+            <div className="evaluate-score-card"><span>{language === "vi" ? "Kết quả" : "Result"}</span><strong>{accuracyPercent}%</strong><small>{evaluate.correct ?? 0}/{evaluate.total ?? 0} {language === "vi" ? "câu đúng" : "correct"}</small></div>
+            <div className="evaluate-score-card"><span>{language === "vi" ? "Khái niệm cần xem lại" : "Concepts to revisit"}</span><strong>{evaluate.weak_concepts?.length ?? 0}</strong><small>{language === "vi" ? "dựa trên evidence + mastery" : "from evidence + mastery"}</small></div>
+          </div>
+          {(evaluate.concepts?.length || 0) > 0 && <div className="evaluate-concept-list">
+            <h3>{language === "vi" ? "Kết quả theo khái niệm" : "Concept-level evidence"}</h3>
+            {evaluate.concepts?.map((concept) => <div className="evaluate-concept-row" key={concept.concept_code}>
+              <div><strong>{language === "vi" ? concept.name_vi : concept.name_en}</strong><span>{concept.concept_code}</span></div>
+              <div><b>{Math.round(concept.accuracy * 100)}%</b><span>{concept.correct}/{concept.total}</span></div>
+            </div>)}
+          </div>}
+          <p className="muted">{language === "vi" ? "Kết quả này được lấy trực tiếp từ practice_attempts, question_attempts và concept_mastery trong database; không phải người học tự đánh dấu đã hoàn thành." : "This evidence comes directly from practice_attempts, question_attempts, and concept_mastery in the database; it is not a self-reported completion flag."}</p>
+          {viewPhase !== phase && <button className="button primary inline" onClick={() => setViewPhase(phase)}>{language === "vi" ? `Trở lại ${phase}` : `Back to ${phase}`}</button>}
+        </>}
+      </article>
+    );
+  };
 
   const renderRethink = () => (
     <article className="lesson-card">

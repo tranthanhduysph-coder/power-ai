@@ -333,3 +333,41 @@ th, td { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; }
   .work-task-head { flex-direction: column; }
   .evidence-ok, .evidence-pending { align-self: flex-start; }
 }
+
+/* POWER v0.7 — database-backed Evaluate */
+.evaluate-phase-card .review-banner { margin-top: 16px; }
+.evaluate-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: 18px 0;
+}
+.evaluate-score-card {
+  border: 1px solid var(--line, #d8e2dc);
+  border-radius: 16px;
+  padding: 18px;
+  background: #f8fbf9;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.evaluate-score-card > span,
+.evaluate-score-card > small { color: #5f6f66; }
+.evaluate-score-card > strong { font-size: 2rem; line-height: 1.05; color: #0f6b45; }
+.evaluate-concept-list { margin: 20px 0; display: grid; gap: 10px; }
+.evaluate-concept-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: center;
+  border-bottom: 1px solid #e3ebe6;
+  padding: 10px 0;
+}
+.evaluate-concept-row > div { display: flex; flex-direction: column; gap: 2px; }
+.evaluate-concept-row > div:last-child { text-align: right; }
+.evaluate-concept-row span { color: #6b766f; font-size: .86rem; }
+.evaluate-result { align-items: flex-start; }
+.evaluate-next-action { margin-top: 12px; max-width: 620px; }
+@media (max-width: 720px) {
+  .evaluate-summary-grid { grid-template-columns: 1fr; }
+}
