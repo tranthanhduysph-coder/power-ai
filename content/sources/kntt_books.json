@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "books": [
+    {
+      "grade": 10,
+      "source_code": "BIO10_KNTT",
+      "title": "Sinh học 10 - Kết nối tri thức với cuộc sống",
+      "language": "vi",
+      "source_role": "curriculum",
+      "publisher": "NXB Giáo dục Việt Nam",
+      "edition": "Kết nối tri thức với cuộc sống",
+      "license_status": "review_required",
+      "document_path": "private_sources/biology10_kntt.pdf",
+      "pdf_page_offset": 1,
+      "expected_pdf_pages": 162
+    },
+    {
+      "grade": 11,
+      "source_code": "BIO11_KNTT",
+      "title": "Sinh học 11 - Kết nối tri thức với cuộc sống",
+      "language": "vi",
+      "source_role": "curriculum",
+      "publisher": "NXB Giáo dục Việt Nam",
+      "edition": "Kết nối tri thức với cuộc sống",
+      "license_status": "review_required",
+      "document_path": "private_sources/biology11_kntt.pdf",
+      "pdf_page_offset": 1,
+      "expected_pdf_pages": 190
+    },
+    {
+      "grade": 12,
+      "source_code": "BIO12_KNTT",
+      "title": "Sinh học 12 - Kết nối tri thức với cuộc sống",
+      "language": "vi",
+      "source_role": "curriculum",
+      "publisher": "NXB Giáo dục Việt Nam",
+      "edition": "Kết nối tri thức với cuộc sống",
+      "license_status": "review_required",
+      "document_path": "private_sources/biology12_kntt.pdf",
+      "pdf_page_offset": 2,
+      "expected_pdf_pages": 199
+    }
+  ]
+}

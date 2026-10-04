@@ -32,7 +32,7 @@ def catalog(
             f"""
             SELECT cu.code, cu.name_vi, cu.name_en, cu.sort_order, cu.unit_type,
                    cu.lesson_number, cu.printed_page_start, cu.printed_page_end,
-                   cu.is_power_ready, cu.metadata_json,
+                   cu.is_power_ready, cu.content_status, cu.content_updated_at, cu.metadata_json,
                    g.level AS grade, s.code AS subject_code,
                    s.name_vi AS subject_vi, s.name_en AS subject_en,
                    p.code AS parent_code, p.name_vi AS parent_vi, p.name_en AS parent_en
@@ -66,7 +66,7 @@ def catalog_tree(
             f"""
             SELECT cu.code, cu.name_vi, cu.name_en, cu.sort_order, cu.unit_type,
                    cu.lesson_number, cu.printed_page_start, cu.printed_page_end,
-                   cu.is_power_ready, cu.metadata_json,
+                   cu.is_power_ready, cu.content_status, cu.content_updated_at, cu.metadata_json,
                    g.level AS grade, p.code AS parent_code
             FROM curriculum_units cu
             JOIN grades g ON g.id = cu.grade_id

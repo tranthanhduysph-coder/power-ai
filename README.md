@@ -208,3 +208,7 @@ Health endpoints:
 - `GET /api/v1/health/live`
 - `GET /api/v1/health`
 - `GET /api/v1/health/ready`
+
+## v1.1 content build
+
+The curriculum catalog is separate from textbook ingestion. Use `scripts/content/build_kntt.py` to plan, ingest and verify the KNTT Biology 10–12 scanned PDFs. `content_status` tracks textbook ingestion; `is_power_ready` remains reserved for reviewed POWER learning blueprints.
