@@ -37,36 +37,57 @@ def tutor_respond(
         row = db.execute(
             text("""
                 SELECT ps.current_phase, ps.learning_session_id,
-                       pps.state_json AS prepare_state,
-                       current_state.state_json AS current_phase_state
+                       prepare_state.state_json AS prepare_state,
+                       organize_state.state_json AS organize_state,
+                       work_state.state_json AS work_state,
+                       requested_state.state_json AS requested_phase_state
                 FROM power_sessions ps
-                LEFT JOIN power_phase_state pps
-                  ON pps.power_session_id = ps.id AND pps.phase = 'PREPARE'
-                LEFT JOIN power_phase_state current_state
-                  ON current_state.power_session_id = ps.id AND current_state.phase = ps.current_phase
+                LEFT JOIN power_phase_state prepare_state
+                  ON prepare_state.power_session_id = ps.id AND prepare_state.phase = 'PREPARE'
+                LEFT JOIN power_phase_state organize_state
+                  ON organize_state.power_session_id = ps.id AND organize_state.phase = 'ORGANIZE'
+                LEFT JOIN power_phase_state work_state
+                  ON work_state.power_session_id = ps.id AND work_state.phase = 'WORK'
+                LEFT JOIN power_phase_state requested_state
+                  ON requested_state.power_session_id = ps.id AND requested_state.phase = :requested_phase
                 WHERE ps.id = :id AND ps.user_id = :user_id
             """),
-            {"id": payload.power_session_id, "user_id": user.id},
+            {
+                "id": payload.power_session_id,
+                "user_id": user.id,
+                "requested_phase": phase,
+            },
         ).mappings().one_or_none()
         if not row:
             raise HTTPException(status_code=404, detail="POWER session not found")
         phase = payload.phase or row["current_phase"]
         learning_session_id = row["learning_session_id"]
         prepare_state = row["prepare_state"] or {}
-        current_phase_state = row["current_phase_state"] or {}
+        organize_state = row["organize_state"] or {}
+        work_state = row["work_state"] or {}
+        requested_phase_state = row["requested_phase_state"] or {}
         learner_context = {
             "goal": prepare_state.get("goal"),
-            "confidence": prepare_state.get("confidence"),
+            "confidence_before": prepare_state.get("confidence"),
             "readiness": (prepare_state.get("diagnostic") or {}).get("readiness"),
             "weak_concepts": (prepare_state.get("diagnostic") or {}).get("weak_concepts", []),
         }
-        if phase == "ORGANIZE":
+        if organize_state:
             learner_context["organize_map"] = {
-                "anchor_concepts": current_phase_state.get("anchor_concepts", []),
-                "links": current_phase_state.get("links", []),
-                "synthesis": current_phase_state.get("synthesis", ""),
-                "coverage": current_phase_state.get("coverage"),
+                "anchor_concepts": organize_state.get("anchor_concepts", []),
+                "links": organize_state.get("links", []),
+                "synthesis": organize_state.get("synthesis", ""),
+                "coverage": organize_state.get("coverage"),
             }
+        if phase == "WORK":
+            learner_context["work_evidence"] = {
+                "responses": work_state.get("responses", {}),
+                "completed_tasks": work_state.get("completed_tasks", []),
+                "confidence_after": work_state.get("confidence_after"),
+                "completion_ratio": work_state.get("completion_ratio"),
+            }
+        elif requested_phase_state:
+            learner_context["phase_state"] = requested_phase_state
 
     retrieved = search_chunks(
         db,

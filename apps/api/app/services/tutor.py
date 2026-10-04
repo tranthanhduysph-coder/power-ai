@@ -41,8 +41,20 @@ def mock_tutor_blocks(language: str, message: str) -> list[dict[str, Any]]:
         }
         prompt = "Why does the lagging strand require Okazaki fragments?"
 
+    if lang == "vi":
+        rich_text = (
+            "#### Ý chính\n\n"
+            f"{text}\n\n"
+            "**Điểm cần nhớ:** cả hai mạch mới đều được kéo dài theo chiều **5′→3′**; sự khác nhau là ở cách tổng hợp liên tục hay gián đoạn."
+        )
+    else:
+        rich_text = (
+            "#### Key idea\n\n"
+            f"{text}\n\n"
+            "**Remember:** both new strands are extended **5′→3′**; the difference is continuous versus discontinuous synthesis."
+        )
     return [
-        {"type": "text", "content": text},
+        {"type": "text", "content": rich_text},
         {"type": "table", **table},
         {"type": "checkpoint", "prompt": prompt},
     ]
@@ -102,7 +114,22 @@ def grounded_tutor_blocks(
             "EVALUATE": "Người học đang ở EVALUATE. Không đưa thẳng đáp án cho một bài đánh giá đang làm; hãy gợi ý, nêu tiêu chí hoặc phản hồi vào lập luận.",
             "RETHINK": "Người học đang ở RETHINK. Giúp xác định vì sao sai, phát biểu lại ý đúng và nêu một điều chỉnh cụ thể cho lần học tiếp theo.",
         }.get(phase, "Giải thích kiến thức Sinh học ngắn gọn, rõ ràng.")
-    instruction = base + phase_rule
+    if language == "en":
+        format_rule = (
+            " Format the answer as clean Markdown that will be rendered as semantic HTML. "
+            "Use short paragraphs, optional level-4 headings (####), **bold** only for key terms, *italics* sparingly, "
+            "and bullet or numbered lists only when they genuinely improve readability. "
+            "Do not output raw HTML, fenced code blocks, decorative symbols, repeated hashes, emoji, or markdown tables. "
+            "Keep the response visually calm and usually under 350 words unless the learner explicitly asks for detail."
+        )
+    else:
+        format_rule = (
+            " Trình bày bằng Markdown sạch để giao diện chuyển thành HTML có ngữ nghĩa. "
+            "Dùng đoạn văn ngắn; có thể dùng tiêu đề cấp 4 (####); chỉ **in đậm** thuật ngữ hoặc ý then chốt; *in nghiêng* rất hạn chế; "
+            "chỉ dùng danh sách khi thật sự giúp dễ đọc. Không xuất HTML thô, code block, ký hiệu trang trí, chuỗi dấu # dư thừa, emoji hoặc bảng Markdown. "
+            "Xuống dòng hợp lý, văn phong tự nhiên và thường không quá 350 từ trừ khi người học chủ động yêu cầu giải thích chi tiết."
+        )
+    instruction = base + phase_rule + format_rule
 
     from openai import OpenAI
 

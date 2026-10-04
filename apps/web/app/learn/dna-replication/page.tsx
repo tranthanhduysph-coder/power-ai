@@ -6,9 +6,8 @@ import { AppShell } from "@/components/app-shell";
 import { AuthGuard } from "@/components/auth-guard";
 import { useAuth } from "@/components/auth-provider";
 import { useLanguage } from "@/components/language-provider";
-import { TutorRenderer } from "@/components/tutor-renderer";
+import { PowerTutorRenderer, type PowerTutorBlock } from "@/components/power-tutor-renderer";
 import { apiFetch } from "@/lib/api";
-import type { TutorBlock } from "@/lib/types";
 
 const phases = ["PREPARE", "ORGANIZE", "WORK", "EVALUATE", "RETHINK"] as const;
 type Phase = (typeof phases)[number];
@@ -83,6 +82,31 @@ type OrganizeState = {
   coverage?: number;
 };
 
+type WorkTask = {
+  code: string;
+  title: string;
+  prompt: string;
+  concept_codes: string[];
+  minimum_chars: number;
+  scaffold: string[];
+};
+
+type WorkBlueprint = {
+  unit_code: string;
+  title: string;
+  intro: string;
+  tasks: WorkTask[];
+  self_check_prompt: string;
+};
+
+type WorkState = {
+  responses?: Record<string, string>;
+  completed_tasks?: string[];
+  confidence_after?: number;
+  evidence_chars?: number;
+  completion_ratio?: number;
+};
+
 type PowerSession = {
   id: string;
   current_phase: Phase;
@@ -115,6 +139,7 @@ export default function LearnPage() {
   const [session, setSession] = useState<PowerSession | null>(null);
   const [blueprint, setBlueprint] = useState<PrepareBlueprint | null>(null);
   const [organizeBlueprint, setOrganizeBlueprint] = useState<OrganizeBlueprint | null>(null);
+  const [workBlueprint, setWorkBlueprint] = useState<WorkBlueprint | null>(null);
   const [phase, setPhase] = useState<Phase>("PREPARE");
   const [viewPhase, setViewPhase] = useState<Phase>("PREPARE");
   const [sessionHistory, setSessionHistory] = useState<PowerSession[]>([]);
@@ -131,9 +156,11 @@ export default function LearnPage() {
     { source: "", relation: "", target: "" },
   ]);
   const [organizeSynthesis, setOrganizeSynthesis] = useState("");
+  const [workResponses, setWorkResponses] = useState<Record<string, string>>({});
+  const [workConfidence, setWorkConfidence] = useState(3);
   const [reflection, setReflection] = useState("");
   const [message, setMessage] = useState("");
-  const [blocks, setBlocks] = useState<TutorBlock[]>([]);
+  const [blocks, setBlocks] = useState<PowerTutorBlock[]>([]);
   const [busy, setBusy] = useState(false);
   const [sessionBusy, setSessionBusy] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
@@ -159,6 +186,9 @@ export default function LearnPage() {
       ...savedLinks,
       ...Array.from({ length: 3 - savedLinks.length }, () => ({ source: "", relation: "", target: "" })),
     ]);
+    const savedWork = (ps.phases?.WORK?.state || {}) as WorkState;
+    setWorkResponses(savedWork.responses || {});
+    setWorkConfidence(savedWork.confidence_after || 3);
     const rethinkState = (ps.phases?.RETHINK?.state || {}) as { reflection?: string };
     setReflection(rethinkState.reflection || "");
     setBlocks([]);
@@ -172,9 +202,10 @@ export default function LearnPage() {
     const load = async () => {
       setSessionBusy(true);
       try {
-        const [bp, obp, ps] = await Promise.all([
+        const [bp, obp, wbp, ps] = await Promise.all([
           apiFetch<PrepareBlueprint>(`/power/prepare/blueprint?unit_code=B12_DNA_REPLICATION&language=${language}`),
           apiFetch<OrganizeBlueprint>(`/power/organize/blueprint?unit_code=B12_DNA_REPLICATION&language=${language}`),
+          apiFetch<WorkBlueprint>(`/power/work/blueprint?unit_code=B12_DNA_REPLICATION&language=${language}`),
           apiFetch<PowerSession>("/power/sessions", {
             method: "POST",
             body: JSON.stringify({ unit_code: "B12_DNA_REPLICATION", language }),
@@ -183,6 +214,7 @@ export default function LearnPage() {
         if (cancelled) return;
         setBlueprint(bp);
         setOrganizeBlueprint(obp);
+        setWorkBlueprint(wbp);
         hydratePowerSession(ps);
         const history = await apiFetch<{ sessions: PowerSession[] }>("/power/sessions/history?unit_code=B12_DNA_REPLICATION&limit=10");
         if (!cancelled) setSessionHistory(history.sessions);
@@ -219,6 +251,12 @@ export default function LearnPage() {
       && validOrganizeLinks.length >= organizeBlueprint.minimum_links
       && organizeSynthesis.trim().length >= 20,
   );
+
+  const workTaskStatus = useMemo(() => {
+    if (!workBlueprint) return { complete: 0, total: 0, canComplete: false };
+    const complete = workBlueprint.tasks.filter((task) => (workResponses[task.code] || "").trim().length >= task.minimum_chars).length;
+    return { complete, total: workBlueprint.tasks.length, canComplete: complete === workBlueprint.tasks.length };
+  }, [workBlueprint, workResponses]);
 
   const getGoalFeedback = async () => {
     if (!goal.trim()) return;
@@ -299,6 +337,32 @@ export default function LearnPage() {
     }
   };
 
+  const saveWork = async (completed: boolean) => {
+    if (!session) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const result = await apiFetch<{ current_phase: Phase; work: WorkState; session: PowerSession }>(`/power/sessions/${session.id}/work`, {
+        method: "PUT",
+        body: JSON.stringify({
+          responses: workResponses,
+          confidence_after: workConfidence,
+          completed,
+        }),
+      });
+      setSession(result.session);
+      setPhase(result.current_phase);
+      if (completed && phase === "WORK") setViewPhase(result.current_phase);
+      setNotice(completed
+        ? (language === "vi" ? "Work đã hoàn thành. Bây giờ hãy thu bằng chứng đánh giá." : "Work is complete. Now collect evaluation evidence.")
+        : (language === "vi" ? "Đã lưu bằng chứng Work của bạn." : "Your Work evidence has been saved."));
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to save Work");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const completeGenericPhase = async (state: Record<string, unknown>) => {
     if (!session) return;
     setBusy(true);
@@ -325,7 +389,7 @@ export default function LearnPage() {
     if (!message.trim() || !session) return;
     setBusy(true);
     try {
-      const res = await apiFetch<{ provider: string; phase: Phase; blocks: TutorBlock[]; retrieval: { count: number } }>("/tutor/respond", {
+      const res = await apiFetch<{ provider: string; phase: Phase; blocks: PowerTutorBlock[]; retrieval: { count: number } }>("/tutor/respond", {
         method: "POST",
         body: JSON.stringify({
           concept_code: "BIO.DNA.REPLICATION",
@@ -561,13 +625,66 @@ export default function LearnPage() {
   );
 
   const renderWork = () => (
-    <article className="lesson-card">
-      <p className="eyebrow">W · Work</p>
-      <h2>{language === "vi" ? "Vì sao có mạch dẫn đầu và mạch chậm?" : "Why are there leading and lagging strands?"}</h2>
-      <p>{language === "vi" ? "Hai mạch DNA ngược chiều nhau. DNA polymerase chỉ kéo dài mạch mới theo chiều 5′→3′. Vì vậy tại một chạc tái bản, một mạch mới có thể được tổng hợp liên tục, trong khi mạch còn lại phải tạo thành các đoạn ngắn rồi nối lại." : "The two DNA templates are antiparallel. DNA polymerase extends new DNA only 5′→3′. At a replication fork, one new strand can therefore be synthesized continuously while the other must be synthesized as short segments that are later joined."}</p>
-      <div className="concept-visual"><div>5′ ─────────────── 3′</div><div className="fork-line">↘ {language === "vi" ? "Mạch dẫn đầu" : "Leading strand"}</div><div className="fork-line">↗ {language === "vi" ? "Mạch chậm · Okazaki" : "Lagging strand · Okazaki"}</div><div>3′ ─────────────── 5′</div></div>
-      <p className="muted">{language === "vi" ? "Hãy dùng Tutor ở bên phải để hỏi, yêu cầu ví dụ hoặc tự kiểm tra cách hiểu của bạn." : "Use the Tutor on the right to ask, request an example, or check your own explanation."}</p>
-      {!phaseDone("WORK") && phase === "WORK" ? <button className="button primary inline" disabled={busy} onClick={() => completeGenericPhase({ work_completed: true })}>{language === "vi" ? "Tôi đã xử lý nội dung chính →" : "I worked through the core content →"}</button> : <span className="pill">{language === "vi" ? "Đã hoàn thành Work" : "Work completed"}</span>}
+    <article className="lesson-card work-phase-card">
+      <div className="phase-title-row">
+        <div>
+          <p className="eyebrow">W · Work</p>
+          <h2>{workBlueprint?.title || (language === "vi" ? "Làm việc sâu với kiến thức" : "Work deeply with the knowledge")}</h2>
+        </div>
+        <span className="pill">{language === "vi" ? `${workTaskStatus.complete}/${workTaskStatus.total} bằng chứng` : `${workTaskStatus.complete}/${workTaskStatus.total} evidence tasks`}</span>
+      </div>
+      <p className="muted">{workBlueprint?.intro}</p>
+
+      <div className="work-progress" aria-label={language === "vi" ? "Tiến độ Work" : "Work progress"}>
+        <div style={{ width: `${workTaskStatus.total ? (workTaskStatus.complete / workTaskStatus.total) * 100 : 0}%` }} />
+      </div>
+
+      <div className="work-task-list">
+        {workBlueprint?.tasks.map((task, index) => {
+          const value = workResponses[task.code] || "";
+          const complete = value.trim().length >= task.minimum_chars;
+          return <section className={["work-task", complete ? "complete" : ""].filter(Boolean).join(" ")} key={task.code}>
+            <div className="work-task-head">
+              <div><span className="task-number">{index + 1}</span><h3>{task.title}</h3></div>
+              <span className={complete ? "evidence-ok" : "evidence-pending"}>{complete ? (language === "vi" ? "Đủ evidence" : "Evidence ready") : `${value.trim().length}/${task.minimum_chars}`}</span>
+            </div>
+            <p className="work-prompt">{task.prompt}</p>
+            <details className="work-scaffold">
+              <summary>{language === "vi" ? "Gợi ý suy nghĩ" : "Thinking prompts"}</summary>
+              <ul>{task.scaffold.map((item) => <li key={item}>{item}</li>)}</ul>
+            </details>
+            <label className="field-block work-response">
+              <span>{language === "vi" ? "Giải thích bằng lời của bạn" : "Explain in your own words"}</span>
+              <textarea
+                value={value}
+                onChange={(e) => setWorkResponses((current) => ({ ...current, [task.code]: e.target.value }))}
+                placeholder={language === "vi" ? "Viết lập luận của bạn ở đây. Không cần giống nguyên văn SGK." : "Write your reasoning here. It does not need to copy the textbook wording."}
+              />
+            </label>
+            <button
+              type="button"
+              className="button secondary tutor-task-button"
+              onClick={() => setMessage(language === "vi"
+                ? `Tôi đang làm ${task.title}. Nhiệm vụ: ${task.prompt}\n\nCâu trả lời hiện tại của tôi: ${value || "(chưa viết)"}\n\nHãy phản hồi bằng gợi ý và câu hỏi dẫn dắt, đừng viết đáp án hoàn chỉnh thay tôi.`
+                : `I am working on ${task.title}. Task: ${task.prompt}\n\nMy current response: ${value || "(not written yet)"}\n\nGive me hints and guiding questions; do not write the full answer for me.`)}
+            >{language === "vi" ? "Nhờ POWER Tutor phản hồi" : "Ask POWER Tutor for feedback"}</button>
+          </section>;
+        })}
+      </div>
+
+      <div className="prepare-section work-self-check">
+        <h3>{language === "vi" ? "Tự kiểm tra sau khi xử lý nhiệm vụ" : "Self-check after working through the tasks"}</h3>
+        <p className="muted">{workBlueprint?.self_check_prompt}</p>
+        <div className="confidence-scale">
+          {[1, 2, 3, 4, 5].map((value) => <button key={value} type="button" className={workConfidence === value ? "active" : ""} onClick={() => setWorkConfidence(value)}>{value}</button>)}
+        </div>
+      </div>
+
+      <div className="phase-actions">
+        <button className="button secondary" onClick={() => saveWork(false)} disabled={busy}>{phaseDone("WORK") ? (language === "vi" ? "Lưu thay đổi Work" : "Save Work changes") : (language === "vi" ? "Lưu Work" : "Save Work")}</button>
+        {!phaseDone("WORK") && phase === "WORK" && <button className="button primary" onClick={() => saveWork(true)} disabled={busy || !workTaskStatus.canComplete}>{language === "vi" ? "Hoàn thành Work →" : "Complete Work →"}</button>}
+        {viewPhase !== phase && <button className="button primary" onClick={() => setViewPhase(phase)}>{language === "vi" ? `Trở lại ${phase}` : `Back to ${phase}`}</button>}
+      </div>
     </article>
   );
 
@@ -631,7 +748,7 @@ export default function LearnPage() {
             {tutorProvider && <div><span className="pill">{tutorProvider === "openai" ? "OpenAI" : "Mock"}</span> <span className="muted">{language === "vi" ? `Retrieval: ${retrievalCount ?? 0} đoạn` : `Retrieval: ${retrievalCount ?? 0} chunks`}</span></div>}
             {tutorProvider === "mock" && <p className="muted">{language === "vi" ? "Tutor đang chạy mock mode. Hãy dùng AI_PROVIDER=openai để kiểm thử Tutor thật." : "Tutor is running in mock mode. Use AI_PROVIDER=openai to test the real Tutor."}</p>}
             <div className="quick-actions">{quickActions.map((x) => <button key={x} onClick={() => setMessage(x)}>{x}</button>)}</div>
-            {blocks.length > 0 && <TutorRenderer blocks={blocks} />}
+            {blocks.length > 0 && <PowerTutorRenderer blocks={blocks} />}
             <div className="tutor-input"><textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder={language === "vi" ? `Hỏi POWER trong pha ${viewPhase}…` : `Ask POWER during ${viewPhase}…`} /><button className="button primary" disabled={busy || !session} onClick={askTutor}>{busy ? "…" : (language === "vi" ? "Gửi" : "Send")}</button></div>
           </aside>
         </div>}
