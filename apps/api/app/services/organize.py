@@ -6,6 +6,8 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.services.curriculum import get_power_blueprint_record
+
 
 RELATION_OPTIONS: tuple[dict[str, str], ...] = (
     {"code": "prerequisite", "vi": "là kiến thức nền cho", "en": "is a prerequisite for"},
@@ -73,6 +75,8 @@ def get_unit_concepts(db: Session, unit_code: str, user_id: Any, language: str) 
 
 def get_organize_blueprint(db: Session, unit_code: str, user_id: Any, language: str) -> dict[str, Any]:
     concepts = get_unit_concepts(db, unit_code, user_id, language)
+    record = get_power_blueprint_record(db, unit_code)
+    policy = record.get("policy") or {}
     is_en = language == "en"
     return {
         "unit_code": unit_code,
@@ -81,8 +85,8 @@ def get_organize_blueprint(db: Session, unit_code: str, user_id: Any, language: 
             {"code": item["code"], "label": item["en"] if is_en else item["vi"]}
             for item in RELATION_OPTIONS
         ],
-        "minimum_anchor_concepts": 3,
-        "minimum_links": 3,
+        "minimum_anchor_concepts": int(policy.get("minimum_anchor_concepts") or 3),
+        "minimum_links": int(policy.get("minimum_links") or 3),
         "synthesis_prompt": (
             "Explain one chain of relationships in your own words. What makes the links meaningful?"
             if is_en

@@ -1,39 +1,53 @@
-from app.services.work import get_work_blueprint, validate_work_payload
+from app.services.work import build_work_blueprint, validate_work_against_blueprint
 
 
-def _complete_responses():
-    return {
-        "W1_DIRECTION": "Hai mạch khuôn ngược chiều nhau và DNA polymerase chỉ kéo dài mạch mới theo chiều 5′→3′, nên tại cùng một chạc tái bản hai mạch mới không thể được tổng hợp theo cùng một kiểu liên tục.",
-        "W2_COMPARE": "Mạch dẫn đầu được tổng hợp liên tục theo hướng chạc tái bản mở ra, còn mạch chậm được tổng hợp gián đoạn thành các đoạn Okazaki. Dù khác kiểu tổng hợp, cả hai mạch mới đều được kéo dài theo chiều 5′→3′.",
-        "W3_CAUSAL": "Vì hai mạch DNA ngược chiều nhau nhưng DNA polymerase chỉ tổng hợp mạch mới theo chiều 5′→3′, một mạch có thể được kéo dài liên tục còn mạch kia phải tổng hợp từng đoạn ngắn. Các đoạn Okazaki sau đó được nối lại để tạo thành mạch DNA liên tục.",
-    }
+WORK = {
+    "vi": {
+        "title": "Làm việc sâu với cơ chế tái bản DNA",
+        "intro": "Tự xử lý kiến thức.",
+        "tasks": [
+            {"code": "W1", "title": "Nhiệm vụ 1", "prompt": "Giải thích", "concept_codes": ["BIO.DNA.REPLICATION"], "minimum_chars": 10, "scaffold": []},
+            {"code": "W2", "title": "Nhiệm vụ 2", "prompt": "So sánh", "concept_codes": ["BIO.DNA.REPLICATION"], "minimum_chars": 10, "scaffold": []},
+            {"code": "W3", "title": "Nhiệm vụ 3", "prompt": "Kết nối", "concept_codes": ["BIO.DNA.REPLICATION"], "minimum_chars": 10, "scaffold": []},
+        ],
+        "self_check_prompt": "Bạn tự tin đến mức nào?",
+    },
+    "en": {
+        "title": "Work deeply",
+        "intro": "Process the knowledge yourself.",
+        "tasks": [],
+        "self_check_prompt": "How confident are you?",
+    },
+}
+
+
+def _responses():
+    return {"W1": "01234567890", "W2": "abcdefghijk", "W3": "ABCDEFGHIJK"}
 
 
 def test_work_blueprint_has_three_learner_tasks():
-    blueprint = get_work_blueprint("B12_DNA_REPLICATION", "vi")
+    blueprint = build_work_blueprint("B12_DNA_REPLICATION", WORK, "vi")
     assert len(blueprint["tasks"]) == 3
-    assert all(task["minimum_chars"] >= 90 for task in blueprint["tasks"])
 
 
 def test_work_complete_requires_evidence_for_each_task():
-    result = validate_work_payload(
-        unit_code="B12_DNA_REPLICATION",
-        language="vi",
-        responses=_complete_responses(),
+    blueprint = build_work_blueprint("B12_DNA_REPLICATION", WORK, "vi")
+    result = validate_work_against_blueprint(
+        blueprint=blueprint,
+        responses=_responses(),
         confidence_after=4,
         completed=True,
     )
     assert result.errors == []
     assert result.completion_ratio == 1.0
     assert len(result.completed_tasks) == 3
-    assert result.evidence_chars > 300
 
 
 def test_work_partial_save_is_allowed():
-    result = validate_work_payload(
-        unit_code="B12_DNA_REPLICATION",
-        language="vi",
-        responses={"W1_DIRECTION": "Tôi mới đang viết câu trả lời."},
+    blueprint = build_work_blueprint("B12_DNA_REPLICATION", WORK, "vi")
+    result = validate_work_against_blueprint(
+        blueprint=blueprint,
+        responses={"W1": "short"},
         confidence_after=3,
         completed=False,
     )

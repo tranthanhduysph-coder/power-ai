@@ -5,8 +5,18 @@ import { useEffect, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { AuthGuard } from "@/components/auth-guard";
 import { useLanguage } from "@/components/language-provider";
+import { useAuth } from "@/components/auth-provider";
 import { apiFetch } from "@/lib/api";
 import type { PracticeQuestion } from "@/lib/types";
+
+
+type CatalogUnit = {
+  code: string;
+  name_vi: string;
+  name_en: string;
+  grade: number;
+  is_power_ready: boolean;
+};
 
 type Generated = {
   practice_set_id: string;
@@ -51,6 +61,7 @@ type Result = {
 
 export default function PracticePage() {
   const { language } = useLanguage();
+  const { user, devMode, loading: authLoading } = useAuth();
   const [mode, setMode] = useState<"custom" | "adaptive">("adaptive");
   const [difficulty, setDifficulty] = useState("auto");
   const [count, setCount] = useState(6);
@@ -59,6 +70,8 @@ export default function PracticePage() {
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
   const [result, setResult] = useState<Result | null>(null);
   const [powerSessionId, setPowerSessionId] = useState<string | null>(null);
+  const [unitCode, setUnitCode] = useState("B12_DNA_REPLICATION");
+  const [readyUnits, setReadyUnits] = useState<CatalogUnit[]>([]);
   const [purpose, setPurpose] = useState<"standalone" | "evaluate">("standalone");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -67,6 +80,8 @@ export default function PracticePage() {
     const params = new URLSearchParams(window.location.search);
     const sessionId = params.get("powerSessionId");
     const requestedPurpose = params.get("purpose");
+    const requestedUnit = params.get("unitCode");
+    if (requestedUnit) setUnitCode(requestedUnit);
     if (sessionId && requestedPurpose === "evaluate") {
       setPowerSessionId(sessionId);
       setPurpose("evaluate");
@@ -74,6 +89,13 @@ export default function PracticePage() {
       setCount(6);
     }
   }, []);
+
+  useEffect(() => {
+    if (authLoading || (!devMode && !user)) return;
+    apiFetch<{ items: CatalogUnit[] }>("/catalog?ready_only=true")
+      .then((res) => setReadyUnits(res.items))
+      .catch((error) => setNotice(error instanceof Error ? error.message : "Unable to load practice topics"));
+  }, [authLoading, devMode, user]);
 
   const toggleType = (type: string) => setTypes((old) => old.includes(type) ? old.filter((x) => x !== type) : [...old, type]);
 
@@ -86,7 +108,7 @@ export default function PracticePage() {
         method: "POST",
         body: JSON.stringify({
           mode,
-          unit_code: "B12_DNA_REPLICATION",
+          unit_code: unitCode,
           difficulty,
           question_types: types,
           question_count: count,
@@ -153,7 +175,7 @@ export default function PracticePage() {
             </button>
           </div>
           <div className="form-grid">
-            <label>{language === "vi" ? "Nội dung" : "Topic"}<select disabled><option>{language === "vi" ? "Tái bản DNA" : "DNA replication"}</option></select></label>
+            <label>{language === "vi" ? "Nội dung" : "Topic"}<select value={unitCode} disabled={evaluateMode} onChange={(e) => setUnitCode(e.target.value)}>{readyUnits.length > 0 ? readyUnits.map((unit) => <option key={unit.code} value={unit.code}>{language === "vi" ? `Sinh học ${unit.grade} · ${unit.name_vi}` : `Biology ${unit.grade} · ${unit.name_en}`}</option>) : <option value={unitCode}>{unitCode}</option>}</select></label>
             <label>{language === "vi" ? "Mức độ khó" : "Difficulty"}<select value={difficulty} onChange={(e) => setDifficulty(e.target.value)}><option value="auto">Adaptive / Auto</option><option value="easy">Easy</option><option value="medium">Medium</option><option value="hard">Hard</option></select></label>
             <label>{language === "vi" ? "Số câu" : "Questions"}<select value={count} onChange={(e) => setCount(Number(e.target.value))}><option>3</option><option>6</option><option>9</option><option>12</option></select></label>
           </div>
@@ -181,7 +203,7 @@ export default function PracticePage() {
             <span>{result.correct}/{result.total} {language === "vi" ? "câu đúng" : "correct"}</span>
             {result.power && <div className="evaluate-next-action">
               <p>{language === "vi" ? "POWER đã lưu kết quả này vào pha Evaluate và chuyển chu trình sang Rethink." : "POWER saved this evidence to Evaluate and advanced the cycle to Rethink."}</p>
-              <Link className="button primary inline" href="/learn/dna-replication">{language === "vi" ? "Tiếp tục Rethink →" : "Continue to Rethink →"}</Link>
+              <Link className="button primary inline" href={`/learn/${encodeURIComponent(unitCode)}`}>{language === "vi" ? "Tiếp tục Rethink →" : "Continue to Rethink →"}</Link>
             </div>}
           </div>}
         </section>}

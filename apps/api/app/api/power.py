@@ -11,6 +11,7 @@ from app.core.auth import CurrentUser, get_current_user
 from app.db.session import get_db
 from app.services.organize import get_organize_blueprint, get_unit_concepts, validate_organize_payload
 from app.services.prepare import analyze_goal, get_prepare_blueprint, score_diagnostic
+from app.services.rethink import load_rethink_blueprint, recommend_next_action, validate_rethink_payload
 from app.services.work import get_work_blueprint, validate_work_payload
 
 router = APIRouter(tags=["power"])
@@ -61,6 +62,16 @@ class OrganizeUpdate(BaseModel):
 class WorkUpdate(BaseModel):
     responses: dict[str, str] = Field(default_factory=dict)
     confidence_after: int = Field(default=3, ge=1, le=5)
+    completed: bool = False
+
+
+class RethinkUpdate(BaseModel):
+    understanding_gain: str = Field(default="", max_length=5000)
+    error_cause: str = Field(default="", max_length=64)
+    corrected_explanation: str = Field(default="", max_length=5000)
+    action_plan: str = Field(default="", max_length=3000)
+    confidence_after_rethink: int = Field(default=3, ge=1, le=5)
+    confirmed_misconceptions: list[str] = Field(default_factory=list)
     completed: bool = False
 
 
@@ -122,10 +133,11 @@ def prepare_blueprint(
     unit_code: str = Query(default="B12_DNA_REPLICATION"),
     language: Literal["vi", "en"] = Query(default="vi"),
     user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     _ = user
     try:
-        return get_prepare_blueprint(unit_code, language)
+        return get_prepare_blueprint(db, unit_code, language)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Prepare blueprint not found for this unit") from exc
 
@@ -148,10 +160,11 @@ def work_blueprint(
     unit_code: str = Query(default="B12_DNA_REPLICATION"),
     language: Literal["vi", "en"] = Query(default="vi"),
     user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     _ = user
     try:
-        return get_work_blueprint(unit_code, language)
+        return get_work_blueprint(db, unit_code, language)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Work blueprint not found for this unit") from exc
 
@@ -160,10 +173,11 @@ def work_blueprint(
 def prepare_goal_feedback(
     payload: GoalFeedbackRequest,
     user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     _ = user
     try:
-        return analyze_goal(payload.goal, payload.target_minutes, payload.unit_code, payload.language)
+        return analyze_goal(db, payload.goal, payload.target_minutes, payload.unit_code, payload.language)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Prepare blueprint not found for this unit") from exc
 
@@ -231,11 +245,15 @@ def start_power_session(
     user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    unit_id = db.execute(
-        text("SELECT id FROM curriculum_units WHERE code = :code"), {"code": payload.unit_code}
-    ).scalar_one_or_none()
-    if not unit_id:
+    unit = db.execute(
+        text("SELECT id, is_power_ready FROM curriculum_units WHERE code = :code AND catalog_visible = true"),
+        {"code": payload.unit_code},
+    ).mappings().one_or_none()
+    if not unit:
         raise HTTPException(status_code=404, detail="Curriculum unit not found")
+    if not unit["is_power_ready"]:
+        raise HTTPException(status_code=409, detail="POWER content is not ready for this curriculum unit yet")
+    unit_id = unit["id"]
 
     existing_id = db.execute(
         text("""
@@ -336,12 +354,13 @@ def update_prepare(
 
     try:
         goal_feedback = analyze_goal(
+            db,
             payload.goal,
             payload.target_minutes,
             owned["unit_code"],
             owned["language"],
         )
-        diagnostic = score_diagnostic(owned["unit_code"], payload.diagnostic_answers)
+        diagnostic = score_diagnostic(db, owned["unit_code"], payload.diagnostic_answers)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Prepare blueprint not found for this unit") from exc
 
@@ -549,6 +568,7 @@ def update_work(
 
     try:
         validation = validate_work_payload(
+            db=db,
             unit_code=owned["unit_code"],
             language=owned["language"],
             responses=payload.responses,
@@ -632,6 +652,238 @@ def update_work(
     }
 
 
+@router.get("/power/sessions/{session_id}/rethink/blueprint")
+def rethink_blueprint(
+    session_id: UUID,
+    language: Literal["vi", "en"] = Query(default="vi"),
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        return load_rethink_blueprint(
+            db,
+            power_session_id=session_id,
+            user_id=user.id,
+            language=language,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="POWER session not found") from exc
+
+
+@router.put("/power/sessions/{session_id}/rethink")
+def update_rethink(
+    session_id: UUID,
+    payload: RethinkUpdate,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        blueprint = load_rethink_blueprint(
+            db,
+            power_session_id=session_id,
+            user_id=user.id,
+            language="vi",
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="POWER session not found") from exc
+
+    if payload.completed and not blueprint["ready"]:
+        raise HTTPException(status_code=409, detail="Evaluate evidence is required before completing Rethink")
+
+    candidates = {item["code"]: item for item in blueprint["candidate_misconceptions"]}
+    validation = validate_rethink_payload(
+        understanding_gain=payload.understanding_gain,
+        error_cause=payload.error_cause,
+        corrected_explanation=payload.corrected_explanation,
+        action_plan=payload.action_plan,
+        confidence_after_rethink=payload.confidence_after_rethink,
+        confirmed_misconceptions=payload.confirmed_misconceptions,
+        allowed_misconceptions=set(candidates),
+        completed=payload.completed,
+    )
+    if validation.errors:
+        raise HTTPException(status_code=422, detail="; ".join(validation.errors))
+
+    owned = db.execute(
+        text("""
+            SELECT ps.learning_session_id, ps.current_phase,
+                   ls.curriculum_unit_id, ls.language, ls.status, cu.code AS unit_code
+            FROM power_sessions ps
+            JOIN learning_sessions ls ON ls.id = ps.learning_session_id
+            JOIN curriculum_units cu ON cu.id = ls.curriculum_unit_id
+            WHERE ps.id = :id AND ps.user_id = :user_id
+        """),
+        {"id": session_id, "user_id": user.id},
+    ).mappings().one()
+
+    evaluate = blueprint.get("evaluate") or {}
+    recommendation = recommend_next_action(
+        accuracy=float(evaluate.get("accuracy") or 0.0),
+        weak_concepts=evaluate.get("weak_concepts") or [],
+        confirmed_misconceptions=validation.confirmed_misconceptions,
+        confidence_after_rethink=validation.confidence_after_rethink,
+        language=owned["language"],
+        unit_code=owned["unit_code"],
+    )
+    state = {
+        "understanding_gain": validation.understanding_gain,
+        "error_cause": validation.error_cause,
+        "corrected_explanation": validation.corrected_explanation,
+        "action_plan": validation.action_plan,
+        "confidence_after_rethink": validation.confidence_after_rethink,
+        "confirmed_misconceptions": validation.confirmed_misconceptions,
+        "candidate_misconceptions": blueprint["candidate_misconceptions"],
+        "evaluate_summary": {
+            "accuracy": evaluate.get("accuracy"),
+            "correct": evaluate.get("correct"),
+            "total": evaluate.get("total"),
+            "weak_concepts": evaluate.get("weak_concepts") or [],
+            "practice_attempt_id": evaluate.get("practice_attempt_id"),
+        },
+        "recommendation": recommendation,
+    }
+
+    db.execute(
+        text("""
+            INSERT INTO power_phase_state(power_session_id, phase, state_json, completed_at)
+            VALUES (:session_id, 'RETHINK', CAST(:state AS jsonb), CASE WHEN :completed THEN now() ELSE NULL END)
+            ON CONFLICT (power_session_id, phase) DO UPDATE
+            SET state_json = EXCLUDED.state_json,
+                completed_at = CASE WHEN :completed THEN COALESCE(power_phase_state.completed_at, now()) ELSE power_phase_state.completed_at END,
+                updated_at = now()
+        """),
+        {
+            "session_id": session_id,
+            "state": json.dumps(state, ensure_ascii=False),
+            "completed": payload.completed,
+        },
+    )
+
+    if payload.completed:
+        for code in validation.confirmed_misconceptions:
+            candidate = candidates[code]
+            misconception = db.execute(
+                text("""
+                    SELECT m.id, m.concept_id
+                    FROM misconceptions m
+                    WHERE m.code = :code
+                """),
+                {"code": code},
+            ).mappings().one()
+            db.execute(
+                text("""
+                    INSERT INTO learner_misconceptions(
+                        user_id, misconception_id, concept_id, confidence, status,
+                        first_detected_at, last_detected_at
+                    )
+                    VALUES (:user_id, :misconception_id, :concept_id, :confidence, 'active', now(), now())
+                    ON CONFLICT (user_id, misconception_id) DO UPDATE
+                    SET confidence = GREATEST(learner_misconceptions.confidence, EXCLUDED.confidence),
+                        status = 'active',
+                        last_detected_at = now()
+                """),
+                {
+                    "user_id": user.id,
+                    "misconception_id": misconception["id"],
+                    "concept_id": misconception["concept_id"],
+                    "confidence": candidate["confidence"],
+                },
+            )
+            db.execute(
+                text("""
+                    INSERT INTO misconception_evidence(
+                        user_id, learning_session_id, misconception_id, concept_id,
+                        evidence_type, evidence_object_id, confidence, details
+                    )
+                    VALUES (
+                        :user_id, :learning_session_id, :misconception_id, :concept_id,
+                        'evaluate_rethink_confirmation', :evidence_object_id, :confidence, CAST(:details AS jsonb)
+                    )
+                    ON CONFLICT (learning_session_id, misconception_id, evidence_type, evidence_object_id)
+                    DO UPDATE SET confidence = EXCLUDED.confidence, details = EXCLUDED.details
+                """),
+                {
+                    "user_id": user.id,
+                    "learning_session_id": owned["learning_session_id"],
+                    "misconception_id": misconception["id"],
+                    "concept_id": misconception["concept_id"],
+                    "evidence_object_id": str(evaluate.get("practice_attempt_id") or ""),
+                    "confidence": candidate["confidence"],
+                    "details": json.dumps(
+                        {
+                            "power_session_id": str(session_id),
+                            "question_codes": candidate.get("question_codes", []),
+                            "learner_confirmed": True,
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            )
+
+        db.execute(
+            text("""
+                UPDATE learning_recommendations
+                SET status = 'dismissed'
+                WHERE learning_session_id = :learning_session_id AND status = 'pending'
+            """),
+            {"learning_session_id": owned["learning_session_id"]},
+        )
+        db.execute(
+            text("""
+                INSERT INTO learning_recommendations(
+                    user_id, learning_session_id, curriculum_unit_id,
+                    recommendation_type, priority, payload, status
+                )
+                VALUES (
+                    :user_id, :learning_session_id, :curriculum_unit_id,
+                    :recommendation_type, :priority, CAST(:payload AS jsonb), 'pending'
+                )
+            """),
+            {
+                "user_id": user.id,
+                "learning_session_id": owned["learning_session_id"],
+                "curriculum_unit_id": owned["curriculum_unit_id"],
+                "recommendation_type": recommendation["type"],
+                "priority": recommendation["priority"],
+                "payload": json.dumps(recommendation, ensure_ascii=False),
+            },
+        )
+        if owned["current_phase"] == "RETHINK":
+            db.execute(
+                text("UPDATE learning_sessions SET status = 'completed', ended_at = COALESCE(ended_at, now()) WHERE id = :id"),
+                {"id": owned["learning_session_id"]},
+            )
+
+    db.execute(
+        text("""
+            INSERT INTO learning_events(user_id, learning_session_id, event_type, payload)
+            VALUES (:user_id, :learning_session_id, :event_type, CAST(:payload AS jsonb))
+        """),
+        {
+            "user_id": user.id,
+            "learning_session_id": owned["learning_session_id"],
+            "event_type": "rethink_completed" if payload.completed else "rethink_saved",
+            "payload": json.dumps(
+                {
+                    "completed": payload.completed,
+                    "error_cause": validation.error_cause,
+                    "confirmed_misconceptions": validation.confirmed_misconceptions,
+                    "recommendation_type": recommendation["type"],
+                },
+                ensure_ascii=False,
+            ),
+        },
+    )
+    db.commit()
+    return {
+        "current_phase": owned["current_phase"],
+        "cycle_completed": bool(payload.completed and owned["current_phase"] == "RETHINK"),
+        "rethink": state,
+        "recommendation": recommendation,
+        "session": _session_payload(db, session_id, user.id),
+    }
+
+
 @router.put("/power/sessions/{session_id}/phase")
 def update_phase(
     session_id: UUID,
@@ -639,6 +891,8 @@ def update_phase(
     user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if payload.phase == "RETHINK":
+        raise HTTPException(status_code=409, detail="Use the dedicated Rethink endpoint so learner-model evidence is preserved")
     owned = db.execute(
         text("SELECT learning_session_id FROM power_sessions WHERE id = :id AND user_id = :user_id"),
         {"id": session_id, "user_id": user.id},

@@ -16,7 +16,7 @@ router = APIRouter(tags=["tutor"])
 
 
 class TutorRequest(BaseModel):
-    concept_code: str = "BIO.DNA.REPLICATION"
+    concept_code: str | None = None
     message: str
     language: Literal["vi", "en"] = "vi"
     power_session_id: UUID | None = None
@@ -32,22 +32,32 @@ def tutor_respond(
     phase = payload.phase or "WORK"
     learner_context: dict = {}
     learning_session_id = None
+    concept_code = payload.concept_code
 
     if payload.power_session_id:
         row = db.execute(
             text("""
                 SELECT ps.current_phase, ps.learning_session_id,
+                       ls.curriculum_unit_id, cu.metadata_json AS unit_metadata,
                        prepare_state.state_json AS prepare_state,
                        organize_state.state_json AS organize_state,
                        work_state.state_json AS work_state,
+                       evaluate_state.state_json AS evaluate_state,
+                       rethink_state.state_json AS rethink_state,
                        requested_state.state_json AS requested_phase_state
                 FROM power_sessions ps
+                JOIN learning_sessions ls ON ls.id = ps.learning_session_id
+                JOIN curriculum_units cu ON cu.id = ls.curriculum_unit_id
                 LEFT JOIN power_phase_state prepare_state
                   ON prepare_state.power_session_id = ps.id AND prepare_state.phase = 'PREPARE'
                 LEFT JOIN power_phase_state organize_state
                   ON organize_state.power_session_id = ps.id AND organize_state.phase = 'ORGANIZE'
                 LEFT JOIN power_phase_state work_state
                   ON work_state.power_session_id = ps.id AND work_state.phase = 'WORK'
+                LEFT JOIN power_phase_state evaluate_state
+                  ON evaluate_state.power_session_id = ps.id AND evaluate_state.phase = 'EVALUATE'
+                LEFT JOIN power_phase_state rethink_state
+                  ON rethink_state.power_session_id = ps.id AND rethink_state.phase = 'RETHINK'
                 LEFT JOIN power_phase_state requested_state
                   ON requested_state.power_session_id = ps.id AND requested_state.phase = :requested_phase
                 WHERE ps.id = :id AND ps.user_id = :user_id
@@ -62,9 +72,26 @@ def tutor_respond(
             raise HTTPException(status_code=404, detail="POWER session not found")
         phase = payload.phase or row["current_phase"]
         learning_session_id = row["learning_session_id"]
+        if not concept_code:
+            metadata = row["unit_metadata"] or {}
+            concept_code = metadata.get("primary_concept_code")
+            if not concept_code:
+                concept_code = db.execute(
+                    text("""
+                        SELECT c.code
+                        FROM curriculum_concepts cc
+                        JOIN concepts c ON c.id = cc.concept_id
+                        WHERE cc.curriculum_unit_id = :unit_id
+                        ORDER BY cc.is_core DESC, c.code
+                        LIMIT 1
+                    """),
+                    {"unit_id": row["curriculum_unit_id"]},
+                ).scalar_one_or_none()
         prepare_state = row["prepare_state"] or {}
         organize_state = row["organize_state"] or {}
         work_state = row["work_state"] or {}
+        evaluate_state = row["evaluate_state"] or {}
+        rethink_state = row["rethink_state"] or {}
         requested_phase_state = row["requested_phase_state"] or {}
         learner_context = {
             "goal": prepare_state.get("goal"),
@@ -86,13 +113,22 @@ def tutor_respond(
                 "confidence_after": work_state.get("confidence_after"),
                 "completion_ratio": work_state.get("completion_ratio"),
             }
+        elif phase == "RETHINK":
+            learner_context["evaluate_evidence"] = {
+                "accuracy": evaluate_state.get("accuracy"),
+                "correct": evaluate_state.get("correct"),
+                "total": evaluate_state.get("total"),
+                "weak_concepts": evaluate_state.get("weak_concepts", []),
+                "concepts": evaluate_state.get("concepts", []),
+            }
+            learner_context["rethink_evidence"] = rethink_state
         elif requested_phase_state:
             learner_context["phase_state"] = requested_phase_state
 
     retrieved = search_chunks(
         db,
         payload.message,
-        concept_code=payload.concept_code,
+        concept_code=concept_code,
         language=payload.language,
         top_k=4,
     )
@@ -113,7 +149,7 @@ def tutor_respond(
             "feature": f"ai_tutor_{provider}",
             "metadata": json.dumps(
                 {
-                    "concept_code": payload.concept_code,
+                    "concept_code": concept_code,
                     "retrieved_chunks": len(retrieved),
                     "power_phase": phase,
                 }
@@ -131,7 +167,7 @@ def tutor_respond(
             "payload": json.dumps(
                 {
                     "phase": phase,
-                    "concept_code": payload.concept_code,
+                    "concept_code": concept_code,
                     "provider": provider,
                     "retrieved_chunks": len(retrieved),
                     "message": payload.message[:1000],

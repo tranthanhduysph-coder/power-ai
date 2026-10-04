@@ -10,7 +10,7 @@ import { useLanguage } from "./language-provider";
 
 const nav = [
   ["/dashboard", "Tổng quan", "Dashboard"],
-  ["/learn/dna-replication", "Học", "Learn"],
+  ["/learn", "Học", "Learn"],
   ["/practice", "Luyện tập", "Practice"],
   ["/progress", "Tiến trình", "Progress"],
 ];
@@ -35,7 +35,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </Link>
         <nav>
           {nav.map(([href, vi, en]) => (
-            <Link key={href} href={href} className={pathname === href ? "nav-link active" : "nav-link"}>
+            <Link key={href} href={href} className={(href === "/learn" ? pathname.startsWith("/learn") : pathname === href) ? "nav-link active" : "nav-link"}>
               {language === "vi" ? vi : en}
             </Link>
           ))}

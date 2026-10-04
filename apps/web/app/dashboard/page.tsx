@@ -22,7 +22,23 @@ type Progress = {
     unit_code: string;
     name_vi: string;
     name_en: string;
+    grade: number;
     updated_at: string;
+  };
+  next_recommendation: null | {
+    id: string;
+    type: string;
+    priority: number;
+    payload: {
+      title?: string;
+      reason?: string;
+      route?: string;
+      weak_concepts?: string[];
+    };
+    created_at: string;
+    unit_code: string | null;
+    name_vi: string | null;
+    name_en: string | null;
   };
 };
 
@@ -61,6 +77,10 @@ export default function DashboardPage() {
   const latestAccuracy = progress?.summary.latest_accuracy;
   const latestPercent = latestAccuracy == null ? 0 : Math.round(latestAccuracy * 100);
   const meanPercent = progress ? Math.round(progress.summary.mean_accuracy * 100) : 0;
+  const recommendation = progress?.next_recommendation;
+  const recommendationTitle = recommendation?.payload?.title || (language === "vi" ? "Luyện tập thích ứng" : "Adaptive practice");
+  const recommendationRoute = recommendation?.payload?.route || "/practice";
+  const continueRoute = progress?.active_cycle ? `/learn/${encodeURIComponent(progress.active_cycle.unit_code)}` : "/learn";
 
   return (
     <AuthGuard>
@@ -73,10 +93,10 @@ export default function DashboardPage() {
         </div>
         <section className="hero-card">
           <div>
-            <span className="pill">Biology 12 · {progress?.active_cycle?.current_phase ?? "PREPARE"}</span>
-            <h2>{progress?.active_cycle ? (language === "vi" ? `Tiếp tục: ${progress.active_cycle.name_vi}` : `Continue: ${progress.active_cycle.name_en}`) : (language === "vi" ? "Bắt đầu: DNA và cơ chế tái bản DNA" : "Start: DNA and DNA replication")}</h2>
+            <span className="pill">{language === "vi" ? `Sinh học ${progress?.active_cycle?.grade ?? "10–12"}` : `Biology ${progress?.active_cycle?.grade ?? "10–12"}`} · {progress?.active_cycle?.current_phase ?? "POWER"}</span>
+            <h2>{progress?.active_cycle ? (language === "vi" ? `Tiếp tục: ${progress.active_cycle.name_vi}` : `Continue: ${progress.active_cycle.name_en}`) : (language === "vi" ? "Chọn một bài học để bắt đầu chu trình POWER" : "Choose a lesson to start a POWER cycle")}</h2>
             <p>{language === "vi" ? "POWER ghi nhớ bạn đang ở pha nào và tiếp tục đúng vị trí trong chu trình học." : "POWER remembers your current phase and resumes the learning cycle at the right place."}</p>
-            <Link className="button primary inline" href="/learn/dna-replication">{language === "vi" ? "Tiếp tục học" : "Continue learning"}</Link>
+            <Link className="button primary inline" href={continueRoute}>{progress?.active_cycle ? (language === "vi" ? "Tiếp tục học" : "Continue learning") : (language === "vi" ? "Chọn bài học" : "Choose lesson")}</Link>
           </div>
           <div className="hero-score">
             <strong>{latestPercent}%</strong>
@@ -90,7 +110,7 @@ export default function DashboardPage() {
         <div className="grid-3">
           <div className="stat-card"><span>{language === "vi" ? "Bộ đề hoàn thành" : "Completed sets"}</span><strong>{progress?.summary.completed_sets ?? 0}</strong></div>
           <div className="stat-card"><span>{language === "vi" ? "Khái niệm đã đo" : "Measured concepts"}</span><strong>{progress?.concepts.length ?? 0}</strong></div>
-          <div className="stat-card"><span>{language === "vi" ? "Gợi ý tiếp theo" : "Next action"}</span><Link href="/practice">{language === "vi" ? "Luyện tập thích ứng →" : "Adaptive practice →"}</Link></div>
+          <div className="stat-card"><span>{language === "vi" ? "Gợi ý tiếp theo" : "Next action"}</span><Link href={recommendationRoute}>{recommendationTitle} →</Link>{recommendation?.payload?.reason && <small className="muted">{recommendation.payload.reason}</small>}</div>
         </div>
       </AppShell>
     </AuthGuard>
