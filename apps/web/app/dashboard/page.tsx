@@ -47,15 +47,26 @@ export default function DashboardPage() {
   const { user, devMode, loading } = useAuth();
   const [me, setMe] = useState<any>(null);
   const [progress, setProgress] = useState<Progress | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const loadDashboard = useCallback(async () => {
     if (loading || (!devMode && !user)) return;
-    const [m, p] = await Promise.all([
-      apiFetch<any>("/me"),
-      apiFetch<Progress>("/progress"),
-    ]);
-    setMe(m);
-    setProgress(p);
+    setRefreshing(true);
+    setLoadError(null);
+    try {
+      const [m, p] = await Promise.all([
+        apiFetch<any>("/me"),
+        apiFetch<Progress>("/progress"),
+      ]);
+      setMe(m);
+      setProgress(p);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Không thể tải Dashboard");
+      throw error;
+    } finally {
+      setRefreshing(false);
+    }
   }, [user, devMode, loading]);
 
   useEffect(() => {
@@ -91,12 +102,13 @@ export default function DashboardPage() {
             <h1>{language === "vi" ? `Chào ${me?.display_name || "bạn"}` : `Welcome ${me?.display_name || "back"}`}</h1>
           </div>
         </div>
+        {loadError && <div className="notice-banner error-notice"><strong>Không thể cập nhật Dashboard.</strong> {loadError} <button className="text-button inline-action" onClick={() => loadDashboard().catch(() => undefined)}>Thử lại</button></div>}
         <section className="hero-card">
           <div>
             <span className="pill">{language === "vi" ? `Sinh học ${progress?.active_cycle?.grade ?? "10–12"}` : `Biology ${progress?.active_cycle?.grade ?? "10–12"}`} · {progress?.active_cycle?.current_phase ?? "POWER"}</span>
             <h2>{progress?.active_cycle ? (language === "vi" ? `Tiếp tục: ${progress.active_cycle.name_vi}` : `Continue: ${progress.active_cycle.name_en}`) : (language === "vi" ? "Chọn một bài học để bắt đầu chu trình POWER" : "Choose a lesson to start a POWER cycle")}</h2>
             <p>{language === "vi" ? "POWER ghi nhớ bạn đang ở pha nào và tiếp tục đúng vị trí trong chu trình học." : "POWER remembers your current phase and resumes the learning cycle at the right place."}</p>
-            <Link className="button primary inline" href={continueRoute}>{progress?.active_cycle ? (language === "vi" ? "Tiếp tục học" : "Continue learning") : (language === "vi" ? "Chọn bài học" : "Choose lesson")}</Link>
+            <Link className="button primary inline" href={continueRoute}>{progress?.active_cycle ? (language === "vi" ? "Tiếp tục học" : "Continue learning") : (language === "vi" ? "Chọn bài học" : "Choose lesson")}</Link>{refreshing && <span className="refresh-indicator">Đang đồng bộ…</span>}
           </div>
           <div className="hero-score">
             <strong>{latestPercent}%</strong>

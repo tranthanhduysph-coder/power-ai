@@ -71,5 +71,7 @@ private/
 
 # Source books / copyrighted documents must not enter Git
 *.pdf
-# Firebase emulator persisted data
-firebase-data/
+
+# Local PostgreSQL backups
+local_backups/*
+!local_backups/.gitkeep

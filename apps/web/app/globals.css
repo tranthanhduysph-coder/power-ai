@@ -422,3 +422,66 @@ th, td { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; }
   .catalog-summary, .catalog-lesson { align-items: flex-start; flex-direction: column; }
   .catalog-lesson .button { width: 100%; text-align: center; }
 }
+
+/* POWER v1.0 local hardening */
+.status-panel {
+  width: min(560px, calc(100vw - 32px));
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 24px;
+  line-height: 1.55;
+}
+.status-panel strong { display: block; font-size: 18px; margin-bottom: 8px; }
+.status-panel p { color: var(--muted); }
+.status-error { border-color: #e2bebe; background: #fffafa; }
+.service-status-banner {
+  border-bottom: 1px solid #e4c887;
+  background: #fff7df;
+  color: #6b511b;
+  padding: 9px 32px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.error-notice { background: #fff4f4; border-color: #e5bcbc; color: #7c3434; }
+.inline-action { margin-left: 8px; text-decoration: underline; font-weight: 800; }
+.refresh-indicator { display: inline-block; margin-left: 12px; color: var(--muted); font-size: 12px; }
+button:disabled, .button:disabled { cursor: not-allowed; opacity: .55; }
+
+@media (max-width: 900px) {
+  .app-layout { display: block; }
+  .sidebar {
+    position: static;
+    height: auto;
+    padding: 14px 16px;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 12px;
+  }
+  .brand { padding: 0; }
+  .sidebar nav { display: flex; gap: 6px; overflow-x: auto; }
+  .nav-link { white-space: nowrap; padding: 9px 10px; }
+  .sidebar-bottom { margin-top: 0; border-top: 0; padding-top: 0; }
+  .topbar { height: 54px; padding: 0 18px; }
+  .page-wrap { padding: 24px 18px 64px; }
+  .service-status-banner { padding: 8px 18px; }
+  .lesson-layout { grid-template-columns: 1fr; }
+  .tutor-card { max-height: none; }
+  .hero-card { grid-template-columns: 1fr; }
+  .hero-score { max-width: 260px; }
+}
+
+@media (max-width: 640px) {
+  .sidebar { grid-template-columns: 1fr auto; }
+  .sidebar nav { grid-column: 1 / -1; order: 3; }
+  .brand-mark { width: 31px; height: 31px; }
+  .grid-3, .grid-2, .mode-grid { grid-template-columns: 1fr; }
+  .power-stepper { gap: 5px; }
+  .power-step { padding: 9px 6px; justify-content: center; }
+  .power-step span { display: none; }
+  .page-heading { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .hero-card { padding: 22px; }
+  .lesson-card, .tutor-card, .practice-builder { padding: 20px; }
+}

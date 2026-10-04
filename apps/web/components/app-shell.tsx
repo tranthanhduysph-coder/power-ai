@@ -7,6 +7,7 @@ import { auth } from "@/lib/firebase";
 import { useAuth } from "./auth-provider";
 import { LanguageToggle } from "./language-toggle";
 import { useLanguage } from "./language-provider";
+import { ServiceStatusBanner } from "./service-status-banner";
 
 const nav = [
   ["/dashboard", "Tổng quan", "Dashboard"],
@@ -49,6 +50,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="topbar-spacer" />
           <LanguageToggle />
         </header>
+        <ServiceStatusBanner />
         <div className="page-wrap">{children}</div>
       </main>
     </div>

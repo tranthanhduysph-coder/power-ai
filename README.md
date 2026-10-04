@@ -1,4 +1,4 @@
-# POWER AI — Local Foundation v0.1
+# POWER AI — v1.0 Local Baseline
 
 Greenfield commercial web application foundation for the **POWER learning process in Biology**.
 
@@ -27,7 +27,7 @@ This repository is intentionally independent from the earlier GOFAI research pro
 
 ## Local vertical slice
 
-The seed content is intentionally small:
+The local release now has a database-driven Biology 10–12 curriculum catalog. The currently POWER-ready content remains intentionally small:
 
 `Biology 10 → Nucleic acids → DNA replication`
 
@@ -183,3 +183,28 @@ python scripts\ingest\ingest_source.py --manifest content\sources\demo_dna_repli
 Then test authenticated retrieval at `POST /api/v1/retrieval/search` in Swagger (`http://localhost:8000/docs`). The v0.2 default embedding provider is `local_hash`: a zero-cost local development embedding used to verify pgvector plumbing. It will be replaced by a production semantic embedding provider later without changing the database contract.
 
 See `docs/architecture/KNOWLEDGE_INGESTION_V02.md` for the full workflow and private-PDF rules.
+
+
+
+## v1.0 local release checks
+
+With the API virtual environment active and local services running:
+
+```bat
+python scripts\release\check_local.py
+```
+
+Database maintenance:
+
+```bat
+python scripts\db\local_db.py status
+python scripts\db\local_db.py backup
+```
+
+Destructive reset and restore require explicit confirmation. See `docs/architecture/POWER_V10_LOCAL_RELEASE.md`.
+
+Health endpoints:
+
+- `GET /api/v1/health/live`
+- `GET /api/v1/health`
+- `GET /api/v1/health/ready`
