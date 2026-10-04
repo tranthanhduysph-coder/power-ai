@@ -10,23 +10,44 @@ type AuthContextValue = {
   user: User | null;
   loading: boolean;
   devMode: boolean;
+  error: string | null;
 };
 
-const AuthContext = createContext<AuthContextValue>({ user: null, loading: true, devMode: DEV_MODE });
+const AuthContext = createContext<AuthContextValue>({
+  user: null,
+  loading: true,
+  devMode: DEV_MODE,
+  error: null,
+});
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(!DEV_MODE);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (DEV_MODE) return;
-    return onAuthStateChanged(auth, (next) => {
-      setUser(next);
+    if (DEV_MODE) {
       setLoading(false);
-    });
+      return;
+    }
+    return onAuthStateChanged(
+      auth,
+      (next) => {
+        setUser(next);
+        setError(null);
+        setLoading(false);
+      },
+      (authError) => {
+        setError(authError?.message || "Firebase Authentication is unavailable.");
+        setLoading(false);
+      }
+    );
   }, []);
 
-  const value = useMemo(() => ({ user, loading, devMode: DEV_MODE }), [user, loading]);
+  const value = useMemo(
+    () => ({ user, loading, devMode: DEV_MODE, error }),
+    [user, loading, error]
+  );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

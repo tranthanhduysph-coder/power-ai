@@ -1,0 +1,19 @@
+{
+  "replace_existing": true,
+  "source": {
+    "code": "BIO10_KNTT",
+    "title": "Sinh học 10 - Kết nối tri thức",
+    "language": "vi",
+    "grade_level": 10,
+    "source_role": "curriculum",
+    "license_status": "private_reference",
+    "storage_key": "private_sources/biology10_kntt.pdf",
+    "metadata": {
+      "note": "Keep the PDF outside Git. Add verified section page ranges before production ingestion."
+    }
+  },
+  "document": {
+    "path": "private_sources/biology10_kntt.pdf"
+  },
+  "sections": []
+}

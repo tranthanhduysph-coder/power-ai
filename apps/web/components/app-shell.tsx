@@ -7,10 +7,11 @@ import { auth } from "@/lib/firebase";
 import { useAuth } from "./auth-provider";
 import { LanguageToggle } from "./language-toggle";
 import { useLanguage } from "./language-provider";
+import { ServiceStatusBanner } from "./service-status-banner";
 
 const nav = [
   ["/dashboard", "Tổng quan", "Dashboard"],
-  ["/learn/dna-replication", "Học", "Learn"],
+  ["/learn", "Học", "Learn"],
   ["/practice", "Luyện tập", "Practice"],
   ["/progress", "Tiến trình", "Progress"],
 ];
@@ -35,7 +36,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </Link>
         <nav>
           {nav.map(([href, vi, en]) => (
-            <Link key={href} href={href} className={pathname === href ? "nav-link active" : "nav-link"}>
+            <Link key={href} href={href} className={(href === "/learn" ? pathname.startsWith("/learn") : pathname === href) ? "nav-link active" : "nav-link"}>
               {language === "vi" ? vi : en}
             </Link>
           ))}
@@ -49,6 +50,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="topbar-spacer" />
           <LanguageToggle />
         </header>
+        <ServiceStatusBanner />
         <div className="page-wrap">{children}</div>
       </main>
     </div>

@@ -7,6 +7,7 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY apps/api/app /app/app
 COPY database /app/database
+COPY content /app/content
 
 ENV PYTHONUNBUFFERED=1
 

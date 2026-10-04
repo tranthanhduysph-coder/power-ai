@@ -1,0 +1,39 @@
+{
+  "BIO.DNA": [
+    "DNA",
+    "deoxyribonucleic acid"
+  ],
+  "BIO.DNA.STRUCTURE": [
+    "cấu trúc DNA",
+    "DNA structure",
+    "hai mạch polynucleotide",
+    "antiparallel"
+  ],
+  "BIO.DNA.REPLICATION": [
+    "tái bản DNA",
+    "nhân đôi DNA",
+    "DNA replication",
+    "replication fork",
+    "chạc tái bản"
+  ],
+  "BIO.DNA.REPLICATION.POLYMERASE": [
+    "DNA polymerase",
+    "polymerase"
+  ],
+  "BIO.DNA.REPLICATION.LEADING": [
+    "mạch dẫn đầu",
+    "leading strand",
+    "tổng hợp liên tục"
+  ],
+  "BIO.DNA.REPLICATION.LAGGING": [
+    "mạch chậm",
+    "lagging strand",
+    "tổng hợp gián đoạn"
+  ],
+  "BIO.DNA.REPLICATION.OKAZAKI": [
+    "đoạn Okazaki",
+    "các đoạn Okazaki",
+    "Okazaki fragment",
+    "Okazaki fragments"
+  ]
+}

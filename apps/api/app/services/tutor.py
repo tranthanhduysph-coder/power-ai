@@ -1,4 +1,8 @@
+from __future__ import annotations
+
 from typing import Any
+
+from app.core.config import get_settings
 
 
 DNA_OVERVIEW = {
@@ -37,23 +41,108 @@ def mock_tutor_blocks(language: str, message: str) -> list[dict[str, Any]]:
         }
         prompt = "Why does the lagging strand require Okazaki fragments?"
 
+    if lang == "vi":
+        rich_text = (
+            "#### Ý chính\n\n"
+            f"{text}\n\n"
+            "**Điểm cần nhớ:** cả hai mạch mới đều được kéo dài theo chiều **5′→3′**; sự khác nhau là ở cách tổng hợp liên tục hay gián đoạn."
+        )
+    else:
+        rich_text = (
+            "#### Key idea\n\n"
+            f"{text}\n\n"
+            "**Remember:** both new strands are extended **5′→3′**; the difference is continuous versus discontinuous synthesis."
+        )
     return [
-        {"type": "text", "content": text},
-        {
-            "type": "diagram",
-            "title": "DNA replication fork",
-            "nodes": [
-                {"id": "fork", "label": "Replication fork" if lang == "en" else "Chạc tái bản"},
-                {"id": "leading", "label": "Leading strand" if lang == "en" else "Mạch dẫn đầu"},
-                {"id": "lagging", "label": "Lagging strand" if lang == "en" else "Mạch chậm"},
-                {"id": "okazaki", "label": "Okazaki fragments" if lang == "en" else "Các đoạn Okazaki"},
-            ],
-            "edges": [
-                {"from": "fork", "to": "leading"},
-                {"from": "fork", "to": "lagging"},
-                {"from": "lagging", "to": "okazaki"},
-            ],
-        },
+        {"type": "text", "content": rich_text},
         {"type": "table", **table},
         {"type": "checkpoint", "prompt": prompt},
     ]
+
+
+def grounded_tutor_blocks(
+    *,
+    language: str,
+    message: str,
+    retrieved: list[Any],
+    phase: str = "WORK",
+    learner_context: dict[str, Any] | None = None,
+) -> tuple[str, list[dict[str, Any]]]:
+    settings = get_settings()
+    if settings.ai_provider != "openai":
+        return "mock", mock_tutor_blocks(language, message)
+    if not settings.openai_api_key:
+        raise RuntimeError("OPENAI_API_KEY is required when AI_PROVIDER=openai")
+
+    context_parts: list[str] = []
+    for item in retrieved:
+        page = (
+            f"{item.page_start}"
+            if item.page_start == item.page_end or item.page_end is None
+            else f"{item.page_start}-{item.page_end}"
+        )
+        printed = item.printed_page_label or ""
+        context_parts.append(
+            f"SOURCE={item.source_code}; TITLE={item.source_title}; PDF_PAGE={page}; PRINTED_PAGE={printed}; SECTION={item.section_title or ''}\n{item.text}"
+        )
+    context = "\n\n---\n\n".join(context_parts)
+
+    phase = (phase or "WORK").upper()
+    learner_context = learner_context or {}
+    if language == "en":
+        base = (
+            "Answer the learner in English using only the supplied textbook context. "
+            "If the context is insufficient, say that the source currently available is insufficient. "
+            "Do not invent citations. "
+        )
+        phase_rule = {
+            "PREPARE": "The learner is in PREPARE. Clarify prior knowledge and goals; avoid doing the whole lesson for them. Give at most one short explanation, then ask one focused readiness question.",
+            "ORGANIZE": "The learner is in ORGANIZE. Use the learner's current organize_map when available. Ask them to justify or refine one relationship at a time; emphasize relationships, categories, sequences, and comparisons. Do not replace their map with a complete ready-made map unless explicitly requested after they have attempted one.",
+            "WORK": "The learner is in WORK. Explain and scaffold the biology clearly, using examples and a brief check-for-understanding when useful.",
+            "EVALUATE": "The learner is in EVALUATE. Do not simply reveal answers to an active assessment. Give hints, criteria, or feedback on reasoning instead.",
+            "RETHINK": "The learner is in RETHINK. Help the learner identify why an error happened, articulate the corrected idea, and state one concrete adjustment for next time.",
+        }.get(phase, "Explain the biology clearly and concisely.")
+    else:
+        base = (
+            "Trả lời người học bằng tiếng Việt, chỉ dựa trên ngữ cảnh SGK/tài liệu được cung cấp. "
+            "Nếu ngữ cảnh chưa đủ, nói rõ nguồn hiện có chưa đủ. Không tự tạo trích dẫn. "
+        )
+        phase_rule = {
+            "PREPARE": "Người học đang ở PREPARE. Hãy làm rõ kiến thức nền và mục tiêu; không giảng thay toàn bộ bài. Chỉ giải thích rất ngắn khi cần rồi đặt một câu hỏi kiểm tra sẵn sàng học tập.",
+            "ORGANIZE": "Người học đang ở ORGANIZE. Nếu learner_context có organize_map, hãy bám vào bản đồ do chính người học đang xây. Yêu cầu họ giải thích hoặc tinh chỉnh từng quan hệ; ưu tiên quan hệ khái niệm, phân loại, trình tự và so sánh. Không thay người học bằng một sơ đồ hoàn chỉnh có sẵn trừ khi họ đã thử xây và chủ động yêu cầu xem mẫu tham khảo.",
+            "WORK": "Người học đang ở WORK. Giải thích và scaffold kiến thức Sinh học rõ ràng, có thể dùng ví dụ và một câu kiểm tra hiểu biết ngắn.",
+            "EVALUATE": "Người học đang ở EVALUATE. Không đưa thẳng đáp án cho một bài đánh giá đang làm; hãy gợi ý, nêu tiêu chí hoặc phản hồi vào lập luận.",
+            "RETHINK": "Người học đang ở RETHINK. Giúp xác định vì sao sai, phát biểu lại ý đúng và nêu một điều chỉnh cụ thể cho lần học tiếp theo.",
+        }.get(phase, "Giải thích kiến thức Sinh học ngắn gọn, rõ ràng.")
+    if language == "en":
+        format_rule = (
+            " Format the answer as clean Markdown that will be rendered as semantic HTML. "
+            "Use short paragraphs, optional level-4 headings (####), **bold** only for key terms, *italics* sparingly, "
+            "and bullet or numbered lists only when they genuinely improve readability. "
+            "Do not output raw HTML, fenced code blocks, decorative symbols, repeated hashes, emoji, or markdown tables. "
+            "Keep the response visually calm and usually under 350 words unless the learner explicitly asks for detail."
+        )
+    else:
+        format_rule = (
+            " Trình bày bằng Markdown sạch để giao diện chuyển thành HTML có ngữ nghĩa. "
+            "Dùng đoạn văn ngắn; có thể dùng tiêu đề cấp 4 (####); chỉ **in đậm** thuật ngữ hoặc ý then chốt; *in nghiêng* rất hạn chế; "
+            "chỉ dùng danh sách khi thật sự giúp dễ đọc. Không xuất HTML thô, code block, ký hiệu trang trí, chuỗi dấu # dư thừa, emoji hoặc bảng Markdown. "
+            "Xuống dòng hợp lý, văn phong tự nhiên và thường không quá 350 từ trừ khi người học chủ động yêu cầu giải thích chi tiết."
+        )
+    instruction = base + phase_rule + format_rule
+
+    from openai import OpenAI
+
+    client = OpenAI(api_key=settings.openai_api_key)
+    response = client.responses.create(
+        model=settings.tutor_model,
+        input=[
+            {
+                "role": "user",
+                "content": (
+                    f"{instruction}\n\nPOWER PHASE: {phase}\nLEARNER CONTEXT: {learner_context}\n\nLEARNER QUESTION:\n{message}\n\nSOURCE CONTEXT:\n{context}"
+                ),
+            }
+        ],
+    )
+    return "openai", [{"type": "text", "content": response.output_text.strip()}]

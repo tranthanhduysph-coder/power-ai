@@ -1,0 +1,34 @@
+{
+  "replace_existing": true,
+  "source": {
+    "code": "POWER_DEMO_DNA",
+    "title": "POWER Demo - DNA replication",
+    "language": "vi",
+    "grade_level": 10,
+    "source_role": "reference",
+    "license_status": "power_owned",
+    "storage_key": "content/sources/demo_dna_replication/source.txt",
+    "metadata": {
+      "purpose": "v0.2 ingestion and retrieval smoke test"
+    }
+  },
+  "document": {
+    "path": "content/sources/demo_dna_replication/source.txt"
+  },
+  "sections": [
+    {
+      "code": "POWER_DEMO_DNA_REPLICATION",
+      "title": "Tái bản DNA",
+      "page_start": 1,
+      "page_end": 1,
+      "level": 1,
+      "concept_codes": [
+        "BIO.DNA.REPLICATION",
+        "BIO.DNA.REPLICATION.POLYMERASE",
+        "BIO.DNA.REPLICATION.LEADING",
+        "BIO.DNA.REPLICATION.LAGGING",
+        "BIO.DNA.REPLICATION.OKAZAKI"
+      ]
+    }
+  ]
+}

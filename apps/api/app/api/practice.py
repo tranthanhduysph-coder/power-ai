@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import CurrentUser, get_current_user
 from app.db.session import get_db
+from app.services.evaluate import summarize_evaluation
 from app.services.mastery import update_mastery
 
 router = APIRouter(tags=["practice"])
@@ -16,12 +17,20 @@ router = APIRouter(tags=["practice"])
 
 class GeneratePractice(BaseModel):
     mode: Literal["custom", "adaptive"] = "custom"
-    unit_code: str = "B10_DNA_REPLICATION"
+    unit_code: str = "B12_DNA_REPLICATION"
     difficulty: Literal["auto", "easy", "medium", "hard"] = "auto"
     question_types: list[Literal["mcq", "true_false", "short_answer"]] = Field(
         default_factory=lambda: ["mcq", "true_false", "short_answer"]
     )
     question_count: int = Field(default=6, ge=3, le=20)
+    power_session_id: UUID | None = None
+    purpose: Literal["standalone", "evaluate"] = "standalone"
+
+    @model_validator(mode="after")
+    def evaluate_requires_power_session(self):
+        if self.purpose == "evaluate" and not self.power_session_id:
+            raise ValueError("power_session_id is required for Evaluate practice")
+        return self
 
 
 class AnswerItem(BaseModel):
@@ -57,6 +66,30 @@ def public_question(row: dict, options: list[dict]) -> dict:
     }
 
 
+def _validate_power_evaluate_context(
+    db: Session,
+    *,
+    user_id: UUID,
+    power_session_id: UUID,
+    unit_id: UUID,
+) -> None:
+    row = db.execute(
+        text("""
+            SELECT ps.current_phase, ls.status, ls.curriculum_unit_id
+            FROM power_sessions ps
+            JOIN learning_sessions ls ON ls.id = ps.learning_session_id
+            WHERE ps.id = :id AND ps.user_id = :user_id
+        """),
+        {"id": power_session_id, "user_id": user_id},
+    ).mappings().one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="POWER session not found")
+    if row["curriculum_unit_id"] != unit_id:
+        raise HTTPException(status_code=422, detail="Practice unit does not match the POWER session")
+    if row["status"] != "active" or row["current_phase"] != "EVALUATE":
+        raise HTTPException(status_code=409, detail="POWER session is not currently in Evaluate")
+
+
 @router.post("/practice/generate")
 def generate_practice(
     payload: GeneratePractice,
@@ -68,6 +101,14 @@ def generate_practice(
     ).scalar_one_or_none()
     if not unit:
         raise HTTPException(status_code=404, detail="Curriculum unit not found")
+
+    if payload.purpose == "evaluate" and payload.power_session_id:
+        _validate_power_evaluate_context(
+            db,
+            user_id=user.id,
+            power_session_id=payload.power_session_id,
+            unit_id=unit,
+        )
 
     params: dict[str, Any] = {
         "unit_id": unit,
@@ -82,7 +123,6 @@ def generate_practice(
         params["difficulty"] = payload.difficulty
 
     if payload.mode == "adaptive":
-        # Prefer questions mapped to the learner's weakest concepts. Recent exposure is penalized.
         sql = f"""
             SELECT q.*, COALESCE(cm.mastery_score, 0.50) AS learner_mastery,
                    COALESCE(recent.seen_count, 0) AS seen_count
@@ -125,8 +165,11 @@ def generate_practice(
 
     set_id = db.execute(
         text("""
-            INSERT INTO practice_sets(user_id, mode, curriculum_unit_id, requested_difficulty, requested_count)
-            VALUES (:user_id, :mode, :unit_id, :difficulty, :count)
+            INSERT INTO practice_sets(
+                user_id, mode, curriculum_unit_id, requested_difficulty, requested_count,
+                power_session_id, purpose
+            )
+            VALUES (:user_id, :mode, :unit_id, :difficulty, :count, :power_session_id, :purpose)
             RETURNING id
         """),
         {
@@ -135,6 +178,8 @@ def generate_practice(
             "unit_id": unit,
             "difficulty": payload.difficulty,
             "count": payload.question_count,
+            "power_session_id": payload.power_session_id,
+            "purpose": payload.purpose,
         },
     ).scalar_one()
 
@@ -154,11 +199,19 @@ def generate_practice(
         text("INSERT INTO usage_ledger(user_id, feature, quantity, metadata) VALUES (:user_id, 'practice_set', 1, CAST(:metadata AS jsonb))"),
         {
             "user_id": user.id,
-            "metadata": json.dumps({"mode": payload.mode, "count": len(questions)}),
+            "metadata": json.dumps(
+                {"mode": payload.mode, "count": len(questions), "purpose": payload.purpose}
+            ),
         },
     )
     db.commit()
-    return {"practice_set_id": str(set_id), "mode": payload.mode, "questions": questions}
+    return {
+        "practice_set_id": str(set_id),
+        "mode": payload.mode,
+        "purpose": payload.purpose,
+        "power_session_id": str(payload.power_session_id) if payload.power_session_id else None,
+        "questions": questions,
+    }
 
 
 def normalize_answer(question_type: str, raw: Any):
@@ -179,6 +232,79 @@ def normalize_answer(question_type: str, raw: Any):
     return str(raw).strip().replace(",", ".")
 
 
+def _complete_power_evaluate(
+    db: Session,
+    *,
+    user_id: UUID,
+    power_session_id: UUID,
+    evaluate_state: dict[str, Any],
+) -> str:
+    owned = db.execute(
+        text("""
+            SELECT ps.learning_session_id, ps.current_phase
+            FROM power_sessions ps
+            WHERE ps.id = :id AND ps.user_id = :user_id
+        """),
+        {"id": power_session_id, "user_id": user_id},
+    ).mappings().one_or_none()
+    if not owned:
+        raise HTTPException(status_code=404, detail="POWER session not found")
+
+    db.execute(
+        text("""
+            INSERT INTO power_phase_state(power_session_id, phase, state_json, completed_at)
+            VALUES (:id, 'EVALUATE', CAST(:state AS jsonb), now())
+            ON CONFLICT (power_session_id, phase) DO UPDATE
+            SET state_json = EXCLUDED.state_json,
+                completed_at = COALESCE(power_phase_state.completed_at, now()),
+                updated_at = now()
+        """),
+        {"id": power_session_id, "state": json.dumps(evaluate_state, ensure_ascii=False)},
+    )
+
+    current_phase = owned["current_phase"]
+    if current_phase == "EVALUATE":
+        current_phase = "RETHINK"
+        db.execute(
+            text("UPDATE power_sessions SET current_phase = 'RETHINK', updated_at = now() WHERE id = :id"),
+            {"id": power_session_id},
+        )
+        db.execute(
+            text("UPDATE learning_sessions SET current_power_phase = 'RETHINK' WHERE id = :id"),
+            {"id": owned["learning_session_id"]},
+        )
+        db.execute(
+            text("""
+                INSERT INTO power_phase_state(power_session_id, phase, state_json)
+                VALUES (:id, 'RETHINK', '{}'::jsonb)
+                ON CONFLICT (power_session_id, phase) DO NOTHING
+            """),
+            {"id": power_session_id},
+        )
+
+    db.execute(
+        text("""
+            INSERT INTO learning_events(user_id, learning_session_id, event_type, payload)
+            VALUES (:user_id, :learning_session_id, 'evaluate_completed', CAST(:payload AS jsonb))
+        """),
+        {
+            "user_id": user_id,
+            "learning_session_id": owned["learning_session_id"],
+            "payload": json.dumps(
+                {
+                    "accuracy": evaluate_state["accuracy"],
+                    "correct": evaluate_state["correct"],
+                    "total": evaluate_state["total"],
+                    "weak_concepts": evaluate_state["weak_concepts"],
+                    "practice_attempt_id": evaluate_state["practice_attempt_id"],
+                },
+                ensure_ascii=False,
+            ),
+        },
+    )
+    return current_phase
+
+
 @router.post("/practice/{practice_set_id}/submit")
 def submit_practice(
     practice_set_id: UUID,
@@ -186,12 +312,28 @@ def submit_practice(
     user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    owned = db.execute(
-        text("SELECT id FROM practice_sets WHERE id = :id AND user_id = :user_id"),
+    practice_set = db.execute(
+        text("""
+            SELECT id, power_session_id, purpose
+            FROM practice_sets
+            WHERE id = :id AND user_id = :user_id
+        """),
         {"id": practice_set_id, "user_id": user.id},
-    ).scalar_one_or_none()
-    if not owned:
+    ).mappings().one_or_none()
+    if not practice_set:
         raise HTTPException(status_code=404, detail="Practice set not found")
+
+    if practice_set["purpose"] == "evaluate":
+        completed_attempt = db.execute(
+            text("""
+                SELECT id FROM practice_attempts
+                WHERE practice_set_id = :set_id AND user_id = :user_id AND completed_at IS NOT NULL
+                ORDER BY completed_at DESC LIMIT 1
+            """),
+            {"set_id": practice_set_id, "user_id": user.id},
+        ).scalar_one_or_none()
+        if completed_attempt:
+            raise HTTPException(status_code=409, detail="This Evaluate practice set has already been submitted")
 
     allowed = {
         str(x)
@@ -219,9 +361,11 @@ def submit_practice(
             text("""
                 SELECT q.id, q.question_type, q.difficulty, q.answer_json,
                        q.explanation_vi, q.explanation_en,
-                       qc.concept_id
+                       qc.concept_id, c.code AS concept_code,
+                       c.name_vi AS concept_name_vi, c.name_en AS concept_name_en
                 FROM questions q
                 JOIN question_concepts qc ON qc.question_id = q.id AND qc.is_primary = true
+                JOIN concepts c ON c.id = qc.concept_id
                 WHERE q.id = :qid
             """),
             {"qid": answer.question_id},
@@ -269,6 +413,9 @@ def submit_practice(
                 "is_correct": is_correct,
                 "explanation_vi": q["explanation_vi"],
                 "explanation_en": q["explanation_en"],
+                "concept_code": q["concept_code"],
+                "concept_name_vi": q["concept_name_vi"],
+                "concept_name_en": q["concept_name_en"],
                 "mastery": mastery,
             }
         )
@@ -279,15 +426,54 @@ def submit_practice(
         text("UPDATE practice_attempts SET completed_at = now(), accuracy = :accuracy WHERE id = :id"),
         {"accuracy": accuracy, "id": attempt_id},
     )
+
+    power_payload = None
+    learning_session_id = None
+    if practice_set["purpose"] == "evaluate" and practice_set["power_session_id"]:
+        evaluate_state = summarize_evaluation(
+            results,
+            practice_set_id=str(practice_set_id),
+            practice_attempt_id=str(attempt_id),
+        )
+        current_phase = _complete_power_evaluate(
+            db,
+            user_id=user.id,
+            power_session_id=practice_set["power_session_id"],
+            evaluate_state=evaluate_state,
+        )
+        learning_session_id = db.execute(
+            text("SELECT learning_session_id FROM power_sessions WHERE id = :id"),
+            {"id": practice_set["power_session_id"]},
+        ).scalar_one()
+        power_payload = {
+            "session_id": str(practice_set["power_session_id"]),
+            "current_phase": current_phase,
+            "evaluate": evaluate_state,
+        }
+
     db.execute(
         text("""
-            INSERT INTO learning_events(user_id, event_type, payload)
-            VALUES (:user_id, 'practice_completed', CAST(:payload AS jsonb))
+            INSERT INTO learning_events(user_id, learning_session_id, event_type, payload)
+            VALUES (:user_id, :learning_session_id, 'practice_completed', CAST(:payload AS jsonb))
         """),
         {
             "user_id": user.id,
-            "payload": json.dumps({"practice_set_id": str(practice_set_id), "accuracy": accuracy}),
+            "learning_session_id": learning_session_id,
+            "payload": json.dumps(
+                {
+                    "practice_set_id": str(practice_set_id),
+                    "practice_attempt_id": str(attempt_id),
+                    "accuracy": accuracy,
+                    "purpose": practice_set["purpose"],
+                }
+            ),
         },
     )
     db.commit()
-    return {"accuracy": accuracy, "correct": correct_total, "total": total, "results": results}
+    return {
+        "accuracy": accuracy,
+        "correct": correct_total,
+        "total": total,
+        "results": results,
+        "power": power_payload,
+    }
