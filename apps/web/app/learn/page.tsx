@@ -18,6 +18,7 @@ type CatalogNode = {
   printed_page_end: number | null;
   is_power_ready: boolean;
   content_status: "not_ingested" | "planned" | "ingested" | "failed";
+  power_status?: "not_started" | "draft" | "validated" | "ready" | "failed";
   children: CatalogNode[];
 };
 
@@ -54,7 +55,7 @@ function LessonRow({ node, language }: { node: CatalogNode; language: "vi" | "en
           {language === "vi" ? "Học bằng POWER" : "Learn with POWER"}
         </Link>
       ) : node.content_status === "ingested" ? (
-        <span className="pill content-ready-pill">{language === "vi" ? "SGK đã nạp · POWER đang chuẩn bị" : "Textbook ingested · POWER pending"}</span>
+        <span className="pill content-ready-pill">{node.power_status === "validated" ? (language === "vi" ? "POWER draft đã kiểm tra · chờ kích hoạt" : "POWER draft validated · awaiting activation") : node.power_status === "draft" ? (language === "vi" ? "POWER draft cần kiểm tra" : "POWER draft needs review") : (language === "vi" ? "SGK đã nạp · POWER đang chuẩn bị" : "Textbook ingested · POWER pending")}</span>
       ) : node.content_status === "failed" ? (
         <span className="pill content-failed-pill">{language === "vi" ? "Nạp nội dung lỗi" : "Content ingest failed"}</span>
       ) : (
