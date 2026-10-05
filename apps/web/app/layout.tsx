@@ -3,14 +3,16 @@ import "./globals.css";
 import { Providers } from "@/components/providers";
 
 export const metadata: Metadata = {
-  title: "POWER AI",
+  title: "POWER-AI-WEB",
   description: "POWER learning for Biology",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="vi">
-      <body><Providers>{children}</Providers></body>
+    <html lang="vi" suppressHydrationWarning>
+      <body>
+        <Providers>{children}</Providers>
+      </body>
     </html>
   );
 }
