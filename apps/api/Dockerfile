@@ -11,4 +11,4 @@ COPY content /app/content
 
 ENV PYTHONUNBUFFERED=1
 
-CMD ["sh", "-c", "python -m app.db.migrate && python -m app.db.seed && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "python -m app.db.migrate && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
