@@ -75,3 +75,9 @@ private/
 # Local PostgreSQL backups
 local_backups/*
 !local_backups/.gitkeep
+
+# Local-only release artifacts
+firebase-data/
+*.bak
+hotfix_*/
+LOCAL_BUILD_COMPLETE.txt

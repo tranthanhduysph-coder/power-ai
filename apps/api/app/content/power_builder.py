@@ -19,6 +19,8 @@ _ALLOWED_QTYPES = {"mcq", "true_false", "short_answer"}
 _ALLOWED_DIFFICULTY = {"easy", "medium", "hard"}
 _ALLOWED_COGNITIVE = {"remember", "understand", "apply", "high_apply"}
 
+# V159_CANONICAL_PRIMARY_LOCK: preserve curriculum primary across regeneration/replacement.
+
 
 @dataclass(frozen=True)
 class UnitSourceContext:
@@ -29,6 +31,7 @@ class UnitSourceContext:
     pdf_page_end: int
     text: str
     fingerprint: str
+    primary_concept_code: str | None = None
 
 
 
@@ -217,6 +220,51 @@ def normalize_power_draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
             if isinstance(option, dict) and "is_correct" in option:
                 option["is_correct"] = _coerce_bool(option.get("is_correct"))
 
+
+        # V158_MCQ_NORMALIZE_FROM_ANSWER
+        # answer_json is the canonical answer. If the LLM omitted/garbled
+        # options[].is_correct, derive the flags deterministically when exactly
+        # one of the four option keys matches answer_json.option.
+        if isinstance(question, dict):
+            _v158_qtype = str(
+                question.get("question_type")
+                or question.get("type")
+                or ""
+            ).strip().lower()
+            if _v158_qtype == "mcq":
+                _v158_options = question.get("options") or []
+                _v158_answer = question.get("answer_json") or {}
+                _v158_answer_key = (
+                    _v158_answer.get("option")
+                    if isinstance(_v158_answer, dict)
+                    else None
+                )
+                if len(_v158_options) == 4 and _v158_answer_key is not None:
+                    _v158_answer_key_norm = str(_v158_answer_key).strip().upper()
+                    _v158_matches = [
+                        idx
+                        for idx, opt in enumerate(_v158_options)
+                        if isinstance(opt, dict)
+                        and str(opt.get("key") or "").strip().upper()
+                        == _v158_answer_key_norm
+                    ]
+                    _v158_explicit_true = [
+                        idx
+                        for idx, opt in enumerate(_v158_options)
+                        if isinstance(opt, dict)
+                        and opt.get("is_correct") is True
+                    ]
+                    if len(_v158_explicit_true) != 1 and len(_v158_matches) == 1:
+                        _v158_correct_idx = _v158_matches[0]
+                        for idx, opt in enumerate(_v158_options):
+                            if isinstance(opt, dict):
+                                opt["is_correct"] = idx == _v158_correct_idx
+                        # Canonicalize answer key casing to the actual option key
+                        # so the existing validator's strict equality also passes.
+                        if isinstance(_v158_answer, dict):
+                            _v158_answer["option"] = str(
+                                _v158_options[_v158_correct_idx].get("key")
+                            )
     for concept in normalized.get("concepts") or []:
         if isinstance(concept, dict) and "is_core" in concept:
             concept["is_core"] = _coerce_bool(concept.get("is_core"))
@@ -290,6 +338,7 @@ def load_unit_source_context(db: Session, unit_code: str, *, max_chars: int = 36
             SELECT cu.id::text AS id, cu.code, cu.name_vi, cu.name_en, cu.unit_type,
                    cu.lesson_number, cu.printed_page_start, cu.printed_page_end,
                    cu.content_status, cu.is_power_ready, cu.power_status,
+                   cu.metadata_json->>'primary_concept_code' AS primary_concept_code,
                    g.level AS grade,
                    s.code AS source_code, s.title AS source_title,
                    cus.pdf_page_start, cus.pdf_page_end
@@ -356,6 +405,11 @@ def load_unit_source_context(db: Session, unit_code: str, *, max_chars: int = 36
         pdf_page_end=int(unit["pdf_page_end"]),
         text=source_text,
         fingerprint=fingerprint,
+        primary_concept_code=(
+            str(_normalize_concept_code(unit.get("primary_concept_code")))
+            if unit.get("primary_concept_code")
+            else None
+        ),
     )
 
 
@@ -382,6 +436,7 @@ English title: {u['name_en']}
 printed pages: {u['printed_page_start']}-{u['printed_page_end']}
 source: {context.source_code}
 PDF pages: {context.pdf_page_start}-{context.pdf_page_end}
+canonical primary concept: {context.primary_concept_code or "NOT YET SET"}
 
 Return this exact top-level shape:
 {{
@@ -416,6 +471,7 @@ Return this exact top-level shape:
 }}
 
 QUALITY REQUIREMENTS
+- If "canonical primary concept" above is not "NOT YET SET", policy.primary_concept_code MUST equal that exact code; the same exact code MUST appear in concepts with is_core=true; and at least one Evaluate question MUST use that exact concept_code. Never replace an existing canonical primary with a newly invented alternative code.
 - concepts: 4–8 concepts; 3–6 should be core. Codes must use canonical dotted identifiers: BIO.<DOMAIN>.<CONCEPT> (for example BIO.GENE.EXPRESSION). Never use BIO_GENE, BIO-GENE, spaces, or other separators.
 - relations: 2–8 meaningful relationships among returned concepts. Every source_code and target_code must exactly match a code returned in concepts, and source_code must never equal target_code.
 - Prepare: 2–4 measurable outcomes and exactly 3 prerequisite/diagnostic items. Diagnostic items test prerequisite/readiness, not the whole lesson.
@@ -600,6 +656,16 @@ def validate_power_draft(payload: dict[str, Any]) -> dict[str, Any]:
     if tf_count < 3:
         errors.append("questions need at least 3 true/false items")
 
+    if primary in code_set:
+        primary_assessed = any(
+            isinstance(q, dict) and q.get("concept_code") == primary
+            for q in questions
+        )
+        if not primary_assessed:
+            errors.append(
+                "primary concept must be directly assessed by at least one Evaluate question"
+            )
+
     if not payload.get("schema_version"):
         warnings.append("schema_version missing")
     return {"valid": not errors, "errors": errors, "warnings": warnings}
@@ -750,7 +816,35 @@ def qa_latest_draft(db: Session, unit_code: str) -> dict[str, Any]:
 def save_draft(db: Session, *, unit_code: str, model: str, payload: dict[str, Any], fingerprint: str) -> dict[str, Any]:
     payload = normalize_power_draft_payload(payload)
     validation = validate_power_draft(payload)
-    unit_id = db.execute(text("SELECT id FROM curriculum_units WHERE code=:code"), {"code": unit_code}).scalar_one()
+
+    unit_row = db.execute(
+        text(
+            """
+            SELECT id,
+                   metadata_json->>'primary_concept_code' AS primary_concept_code
+            FROM curriculum_units
+            WHERE code=:code
+            """
+        ),
+        {"code": unit_code},
+    ).mappings().one()
+    unit_id = unit_row["id"]
+
+    canonical_primary = (
+        str(_normalize_concept_code(unit_row.get("primary_concept_code")))
+        if unit_row.get("primary_concept_code")
+        else None
+    )
+    generated_primary = str(
+        ((payload.get("policy") or {}).get("primary_concept_code")) or ""
+    )
+    if canonical_primary and generated_primary != canonical_primary:
+        validation["errors"].append(
+            "policy.primary_concept_code must preserve curriculum canonical primary "
+            f"{canonical_primary}; got {generated_primary or '<missing>'}"
+        )
+        validation["valid"] = False
+
     version = int(db.execute(
         text("SELECT COALESCE(MAX(version),0)+1 FROM power_blueprint_drafts WHERE curriculum_unit_id=:id"),
         {"id": unit_id},
@@ -794,7 +888,8 @@ def latest_draft(db: Session, unit_code: str) -> dict[str, Any]:
                    pbd.validation_json, pbd.source_fingerprint, pbd.model,
                    pbd.qa_status, pbd.qa_json, pbd.qa_checked_at,
                    cu.id::text AS curriculum_unit_id, cu.content_status, cu.is_power_ready,
-                   cu.power_status, cu.name_vi, cu.name_en
+                   cu.power_status, cu.name_vi, cu.name_en,
+                   cu.metadata_json->>'primary_concept_code' AS canonical_primary_concept_code
             FROM power_blueprint_drafts pbd
             JOIN curriculum_units cu ON cu.id=pbd.curriculum_unit_id
             WHERE cu.code=:unit_code
@@ -1014,6 +1109,18 @@ def activate_latest_draft(db: Session, unit_code: str, *, force: bool = False) -
         raise ValueError("Unit content is not ingested")
     if draft["is_power_ready"] and not force:
         raise ValueError("Unit is already POWER-ready; pass --force to replace its generated package")
+
+    canonical_primary = (
+        str(_normalize_concept_code(draft.get("canonical_primary_concept_code")))
+        if draft.get("canonical_primary_concept_code")
+        else None
+    )
+    payload_primary = str(((payload.get("policy") or {}).get("primary_concept_code")) or "")
+    if canonical_primary and payload_primary != canonical_primary:
+        raise ValueError(
+            "Refusing to replace canonical primary concept "
+            f"{canonical_primary} with {payload_primary or '<missing>'}"
+        )
 
     unit_id = draft["curriculum_unit_id"]
     concept_ids: dict[str, Any] = {}
