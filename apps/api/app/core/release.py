@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-LATEST_MIGRATION = "007_active_cycle_integrity"
+LATEST_MIGRATION = "012_power_blueprint_drafts"
 REQUIRED_MIGRATIONS = (
     "001_initial",
     "002_knowledge_ingestion",
@@ -11,6 +11,11 @@ REQUIRED_MIGRATIONS = (
     "005_rethink_learning_model",
     "006_curriculum_generalization",
     "007_active_cycle_integrity",
+    "008_content_build_status",
+    "009_content_status_reconciliation",
+    "010_content_status_mapping_reconciliation",
+    "011_content_status_strict_page_evidence",
+    "012_power_blueprint_drafts",
 )
 REQUIRED_TABLES = (
     "users",
@@ -25,8 +30,9 @@ REQUIRED_TABLES = (
     "source_pages",
     "content_chunks",
     "power_unit_blueprints",
+    "power_blueprint_drafts",
 )
-LOCAL_RELEASE_VERSION = "1.0.1-local"
+LOCAL_RELEASE_VERSION = "1.2.0-content-local"
 
 
 @dataclass(frozen=True)

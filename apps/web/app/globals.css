@@ -485,3 +485,16 @@ button:disabled, .button:disabled { cursor: not-allowed; opacity: .55; }
   .hero-card { padding: 22px; }
   .lesson-card, .tutor-card, .practice-builder { padding: 20px; }
 }
+
+/* POWER AI v1.1 content-build status */
+.content-ready-pill {
+  background: #edf7f0;
+  color: #176b43;
+  border: 1px solid #c9e7d4;
+}
+
+.content-failed-pill {
+  background: #fff1f0;
+  color: #9f2f2f;
+  border: 1px solid #f2c4c0;
+}

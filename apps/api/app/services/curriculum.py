@@ -13,7 +13,7 @@ def get_unit_record(db: Session, unit_code: str) -> dict[str, Any]:
             """
             SELECT cu.id, cu.code, cu.name_vi, cu.name_en, cu.unit_type, cu.lesson_number,
                    cu.printed_page_start, cu.printed_page_end, cu.is_power_ready,
-                   cu.catalog_visible, cu.metadata_json,
+                   cu.content_status, cu.content_updated_at, cu.power_status, cu.catalog_visible, cu.metadata_json,
                    g.level AS grade, g.name_vi AS grade_name_vi, g.name_en AS grade_name_en,
                    s.code AS subject_code, s.name_vi AS subject_name_vi, s.name_en AS subject_name_en,
                    p.code AS parent_code, p.name_vi AS parent_name_vi, p.name_en AS parent_name_en
@@ -37,7 +37,7 @@ def get_power_blueprint_record(db: Session, unit_code: str) -> dict[str, Any]:
     row = db.execute(
         text(
             """
-            SELECT cu.code AS unit_code, cu.name_vi, cu.name_en, cu.is_power_ready, cu.metadata_json,
+            SELECT cu.code AS unit_code, cu.name_vi, cu.name_en, cu.is_power_ready, cu.content_status, cu.content_updated_at, cu.power_status, cu.metadata_json,
                    pub.version, pub.prepare_json, pub.work_json, pub.policy_json
             FROM curriculum_units cu
             LEFT JOIN power_unit_blueprints pub ON pub.curriculum_unit_id = cu.id

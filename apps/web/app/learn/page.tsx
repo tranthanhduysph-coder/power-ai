@@ -17,6 +17,8 @@ type CatalogNode = {
   printed_page_start: number | null;
   printed_page_end: number | null;
   is_power_ready: boolean;
+  content_status: "not_ingested" | "planned" | "ingested" | "failed";
+  power_status?: "not_started" | "draft" | "validated" | "ready" | "failed";
   children: CatalogNode[];
 };
 
@@ -25,6 +27,10 @@ type CatalogGrade = { grade: number; items: CatalogNode[] };
 
 function countReady(nodes: CatalogNode[]): number {
   return nodes.reduce((total, node) => total + (node.is_power_ready ? 1 : 0) + countReady(node.children || []), 0);
+}
+
+function countIngested(nodes: CatalogNode[]): number {
+  return nodes.reduce((total, node) => total + (node.content_status === "ingested" ? 1 : 0) + countIngested(node.children || []), 0);
 }
 
 function LessonRow({ node, language }: { node: CatalogNode; language: "vi" | "en" }) {
@@ -48,8 +54,12 @@ function LessonRow({ node, language }: { node: CatalogNode; language: "vi" | "en
         <Link className="button primary inline" href={`/learn/${encodeURIComponent(node.code)}`}>
           {language === "vi" ? "Học bằng POWER" : "Learn with POWER"}
         </Link>
+      ) : node.content_status === "ingested" ? (
+        <span className="pill content-ready-pill">{node.power_status === "validated" ? (language === "vi" ? "POWER draft đã kiểm tra · chờ kích hoạt" : "POWER draft validated · awaiting activation") : node.power_status === "draft" ? (language === "vi" ? "POWER draft cần kiểm tra" : "POWER draft needs review") : (language === "vi" ? "SGK đã nạp · POWER đang chuẩn bị" : "Textbook ingested · POWER pending")}</span>
+      ) : node.content_status === "failed" ? (
+        <span className="pill content-failed-pill">{language === "vi" ? "Nạp nội dung lỗi" : "Content ingest failed"}</span>
       ) : (
-        <span className="pill muted-pill">{language === "vi" ? "Chưa nạp POWER" : "POWER content pending"}</span>
+        <span className="pill muted-pill">{language === "vi" ? "Chưa nạp nội dung" : "Content not ingested"}</span>
       )}
     </div>
   );
@@ -88,6 +98,7 @@ export default function LearnCatalogPage() {
 
   const current = grades.find((g) => g.grade === selectedGrade);
   const readyCount = current ? countReady(current.items) : 0;
+  const ingestedCount = current ? countIngested(current.items) : 0;
 
   return (
     <AuthGuard>
@@ -105,7 +116,7 @@ export default function LearnCatalogPage() {
         {error && <div className="notice-banner">{error}</div>}
         <div className="catalog-summary card">
           <strong>{language === "vi" ? `Sinh học ${selectedGrade}` : `Biology ${selectedGrade}`}</strong>
-          <span>{language === "vi" ? `${readyCount} bài đã nạp POWER` : `${readyCount} POWER-ready lesson(s)`}</span>
+          <span>{language === "vi" ? `${ingestedCount} bài đã nạp SGK · ${readyCount} bài sẵn sàng POWER` : `${ingestedCount} textbook unit(s) ingested · ${readyCount} POWER-ready`}</span>
         </div>
         <div className="curriculum-catalog">
           {current?.items.map((node) => <CatalogNodeView key={node.code} node={node} language={language} />)}

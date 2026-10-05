@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     ai_provider: str = "mock"
     openai_api_key: str | None = None
     tutor_model: str = "gpt-5.6-luna"
+    content_model: str = "gpt-5.6-luna"
     vision_provider: str = "disabled"
     vision_model: str = "gpt-5.6-luna"
     vision_min_text_chars: int = 80
