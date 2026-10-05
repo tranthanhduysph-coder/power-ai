@@ -498,3 +498,375 @@ button:disabled, .button:disabled { cursor: not-allowed; opacity: .55; }
   color: #9f2f2f;
   border: 1px solid #f2c4c0;
 }
+
+/* POWER-AI-WEB v1.7.1 — biological UI layer, dark mode, study timer, footer */
+html {
+  min-height: 100%;
+}
+
+body {
+  min-height: 100vh;
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(circle at 12% 8%, rgba(31, 111, 74, .055) 0 1.5px, transparent 1.8px),
+    radial-gradient(circle at 88% 18%, rgba(31, 111, 74, .04) 0 1.2px, transparent 1.5px);
+  background-size: 34px 34px, 48px 48px;
+  background-attachment: fixed;
+}
+
+html[data-theme="dark"] {
+  --bg: #07130e;
+  --surface: #0f1e17;
+  --surface-soft: #14271e;
+  --text: #e6f1e9;
+  --muted: #9caf9f;
+  --line: #294137;
+  --primary: #71d69d;
+  --primary-dark: #a4ebc0;
+  --accent: #173a2a;
+  --danger: #ff9b9b;
+  --success: #86dfab;
+  --shadow: 0 12px 34px rgba(0, 0, 0, .28);
+}
+
+html[data-theme="dark"] body {
+  background-image:
+    radial-gradient(circle at 12% 8%, rgba(113, 214, 157, .065) 0 1.5px, transparent 1.8px),
+    radial-gradient(circle at 88% 18%, rgba(113, 214, 157, .045) 0 1.2px, transparent 1.5px);
+}
+
+html[data-theme="dark"] .topbar {
+  background: rgba(7, 19, 14, .88);
+}
+
+html[data-theme="dark"] .auth-page {
+  background: radial-gradient(circle at top, #123326 0, var(--bg) 52%);
+}
+
+html[data-theme="dark"] .auth-card,
+html[data-theme="dark"] .language-toggle,
+html[data-theme="dark"] .button.secondary,
+html[data-theme="dark"] input,
+html[data-theme="dark"] textarea,
+html[data-theme="dark"] select,
+html[data-theme="dark"] .power-step,
+html[data-theme="dark"] .quick-actions button,
+html[data-theme="dark"] .diagram-node,
+html[data-theme="dark"] .option,
+html[data-theme="dark"] .option-button,
+html[data-theme="dark"] .concept-card,
+html[data-theme="dark"] .relation-remove,
+html[data-theme="dark"] .map-link strong,
+html[data-theme="dark"] .confidence-button,
+html[data-theme="dark"] .confidence-scale button,
+html[data-theme="dark"] .work-task,
+html[data-theme="dark"] .rethink-evidence-row,
+html[data-theme="dark"] .misconception-card,
+html[data-theme="dark"] .grade-tab,
+html[data-theme="dark"] .catalog-part,
+html[data-theme="dark"] .catalog-lesson,
+html[data-theme="dark"] .smart-chip,
+html[data-theme="dark"] .diagnostic-item {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--line);
+}
+
+html[data-theme="dark"] .catalog-part > .catalog-group-heading,
+html[data-theme="dark"] .tutor-table th,
+html[data-theme="dark"] .checkpoint,
+html[data-theme="dark"] .empty-map,
+html[data-theme="dark"] .review-banner.complete-cycle,
+html[data-theme="dark"] .recommendation-card,
+html[data-theme="dark"] .rethink-empty {
+  background: var(--surface-soft);
+  color: var(--text);
+}
+
+html[data-theme="dark"] .lesson-card p,
+html[data-theme="dark"] .outcome-list,
+html[data-theme="dark"] .concept-card span,
+html[data-theme="dark"] .work-scaffold ul,
+html[data-theme="dark"] .tutor-rich-text,
+html[data-theme="dark"] .misconception-card p,
+html[data-theme="dark"] .form-stack label,
+html[data-theme="dark"] .form-grid label,
+html[data-theme="dark"] .field-block {
+  color: var(--muted);
+}
+
+html[data-theme="dark"] .tutor-rich-text h4,
+html[data-theme="dark"] .tutor-rich-text strong,
+html[data-theme="dark"] .work-scaffold summary,
+html[data-theme="dark"] .recommendation-card h3 {
+  color: var(--text);
+}
+
+html[data-theme="dark"] .tutor-rich-text code {
+  background: #193027;
+  border-color: var(--line);
+}
+
+html[data-theme="dark"] .tutor-rich-text blockquote {
+  background: #12261d;
+  color: var(--muted);
+}
+
+html[data-theme="dark"] .feedback.correct {
+  background: #113323;
+  color: #8be0ae;
+}
+
+html[data-theme="dark"] .feedback.incorrect,
+html[data-theme="dark"] .error-box,
+html[data-theme="dark"] .error-notice {
+  background: #32191b;
+  color: #ffb2b2;
+}
+
+.study-dock {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 40;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  max-width: min(720px, calc(100vw - 36px));
+}
+
+.study-dock-bio,
+.study-timer,
+.theme-toggle {
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
+}
+
+.study-dock-bio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 300px;
+  padding: 9px 12px;
+  border-radius: 14px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.study-dock-bio > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.study-timer {
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-areas:
+    "label time"
+    "actions actions";
+  gap: 3px 10px;
+  align-items: center;
+  min-width: 148px;
+  padding: 7px 10px;
+  border-radius: 14px;
+}
+
+.study-timer-label {
+  grid-area: label;
+  color: var(--primary);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: .14em;
+}
+
+.study-timer strong {
+  grid-area: time;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  letter-spacing: .03em;
+}
+
+.study-timer-actions {
+  grid-area: actions;
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.study-timer-actions button,
+.theme-toggle {
+  border: 0;
+  color: var(--text);
+}
+
+.study-timer-actions button {
+  width: 28px;
+  height: 24px;
+  border-radius: 7px;
+  background: var(--surface-soft);
+  line-height: 1;
+}
+
+.study-timer-actions button:hover,
+.theme-toggle:hover {
+  background: var(--accent);
+}
+
+.theme-toggle {
+  width: 46px;
+  min-width: 46px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  font-size: 19px;
+}
+
+.site-footer {
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  color: var(--muted);
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: center;
+  padding: 18px 28px 86px;
+  font-size: 12px;
+}
+
+.site-footer > div {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+
+.site-footer strong {
+  color: var(--text);
+}
+
+.site-footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.site-footer button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--primary);
+  font-weight: 750;
+}
+
+.site-footer button:hover {
+  text-decoration: underline;
+}
+
+.info-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: rgba(3, 12, 8, .58);
+  backdrop-filter: blur(6px);
+}
+
+.info-modal {
+  width: min(680px, 100%);
+  max-height: min(760px, calc(100vh - 44px));
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, .28);
+  padding: 24px;
+}
+
+.info-modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 18px;
+  margin-bottom: 14px;
+}
+
+.info-modal-head h2 {
+  margin: 4px 0 0;
+  font-size: 24px;
+}
+
+.info-modal-head > button {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-soft);
+  color: var(--text);
+  font-size: 24px;
+  line-height: 1;
+}
+
+.info-modal > p {
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.bio-note {
+  margin-top: 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-soft);
+  color: var(--text);
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 14px;
+  font-size: 13px;
+}
+
+@media (max-width: 760px) {
+  .study-dock {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    max-width: none;
+  }
+
+  .study-dock-bio {
+    display: none;
+  }
+
+  .study-timer {
+    flex: 1;
+    grid-template-columns: auto auto 1fr;
+    grid-template-areas: "label time actions";
+  }
+
+  .study-timer-actions {
+    align-self: center;
+  }
+
+  .site-footer {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 18px 18px 82px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition: none !important;
+    animation: none !important;
+  }
+}
