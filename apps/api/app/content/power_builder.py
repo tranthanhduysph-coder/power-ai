@@ -73,6 +73,63 @@ def _normalize_concept_code(value: Any) -> Any:
     return raw
 
 
+def _match_tokens(value: Any) -> set[str]:
+    text_value = str(value or "").lower()
+    text_value = re.sub(r"[^0-9a-zà-ỹđ]+", " ", text_value, flags=re.IGNORECASE)
+    stop = {
+        "va", "và", "cua", "của", "la", "là", "cho", "trong", "voi", "với",
+        "the", "of", "and", "in", "to", "a", "an", "biology", "sinh", "hoc", "học",
+    }
+    return {token for token in text_value.split() if len(token) >= 3 and token not in stop}
+
+
+def _repair_primary_question_mapping(payload: dict[str, Any]) -> None:
+    """Repair only clearly mis-tagged Evaluate coverage of the primary concept.
+
+    The model occasionally writes a question whose stem explicitly names the primary
+    concept but assigns a neighbouring concept_code. In that narrow case we can
+    safely repair the metadata without rewriting the question. If no question
+    clearly refers to the primary concept, leave the draft unchanged so QA can
+    reject it and require regeneration rather than inventing an assessment item.
+    """
+    policy = payload.get("policy") or {}
+    primary = str(policy.get("primary_concept_code") or "")
+    if not primary:
+        return
+    questions = [q for q in (payload.get("questions") or []) if isinstance(q, dict)]
+    if any(str(q.get("concept_code") or "") == primary for q in questions):
+        return
+
+    primary_concept = next(
+        (c for c in (payload.get("concepts") or []) if isinstance(c, dict) and str(c.get("code") or "") == primary),
+        None,
+    )
+    if not primary_concept:
+        return
+
+    alias_tokens = _match_tokens(primary_concept.get("name_vi")) | _match_tokens(primary_concept.get("name_en"))
+    # Code fragments are useful only as a fallback for compact terms such as DNA/RNA.
+    alias_tokens |= {part.lower() for part in primary.split(".")[1:] if len(part) >= 3}
+    if not alias_tokens:
+        return
+
+    best_question: dict[str, Any] | None = None
+    best_score = 0
+    for question in questions:
+        stem_tokens = _match_tokens(question.get("stem_vi")) | _match_tokens(question.get("stem_en"))
+        overlap = alias_tokens & stem_tokens
+        # Require at least two meaningful shared terms, or one distinctive long token.
+        score = len(overlap)
+        distinctive = any(len(token) >= 7 for token in overlap)
+        if score >= 2 or distinctive:
+            if score > best_score or best_question is None:
+                best_question = question
+                best_score = score
+
+    if best_question is not None:
+        best_question["concept_code"] = primary
+
+
 def normalize_power_draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Normalize harmless model JSON type drift before strict validation/storage.
 
@@ -88,10 +145,38 @@ def normalize_power_draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
         if isinstance(concept, dict) and "code" in concept:
             concept["code"] = _normalize_concept_code(concept.get("code"))
 
+    concept_code_set = {
+        str(concept.get("code"))
+        for concept in (normalized.get("concepts") or [])
+        if isinstance(concept, dict) and concept.get("code")
+    }
+
+    # Relations are generated scaffolding, so repair only unambiguous structural
+    # defects before strict validation: normalize concept codes, drop self-links,
+    # drop links to concepts that are not in this draft, and remove duplicates.
+    # Unsupported relation types are intentionally preserved so validation can
+    # still reject them instead of silently changing their meaning.
+    repaired_relations: list[Any] = []
+    seen_relations: set[tuple[str, str, str]] = set()
     for relation in normalized.get("relations") or []:
-        if isinstance(relation, dict):
-            relation["source_code"] = _normalize_concept_code(relation.get("source_code"))
-            relation["target_code"] = _normalize_concept_code(relation.get("target_code"))
+        if not isinstance(relation, dict):
+            repaired_relations.append(relation)
+            continue
+        relation["source_code"] = _normalize_concept_code(relation.get("source_code"))
+        relation["target_code"] = _normalize_concept_code(relation.get("target_code"))
+        source = str(relation.get("source_code") or "")
+        target = str(relation.get("target_code") or "")
+        relation_type = str(relation.get("relation_type") or "")
+        if source == target:
+            continue
+        if source not in concept_code_set or target not in concept_code_set:
+            continue
+        key = (source, target, relation_type)
+        if key in seen_relations:
+            continue
+        seen_relations.add(key)
+        repaired_relations.append(relation)
+    normalized["relations"] = repaired_relations
 
     prepare = normalized.get("prepare") or {}
     for item in prepare.get("diagnostic_items") or []:
@@ -135,6 +220,48 @@ def normalize_power_draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
     for concept in normalized.get("concepts") or []:
         if isinstance(concept, dict) and "is_core" in concept:
             concept["is_core"] = _coerce_bool(concept.get("is_core"))
+
+    # Repair harmless model drift in the number of core concepts. POWER requires
+    # 3–6 core concepts for a unit. The exact core flag is scaffolding metadata,
+    # so we can repair it deterministically without changing the concept set:
+    # always keep the primary concept core, promote concepts in source order until
+    # there are at least 3, and trim excess core flags to at most 6.
+    concepts = [c for c in (normalized.get("concepts") or []) if isinstance(c, dict)]
+    policy = normalized.get("policy") or {}
+    primary = policy.get("primary_concept_code") if isinstance(policy, dict) else None
+    if concepts:
+        by_code = {str(c.get("code") or ""): c for c in concepts if c.get("code")}
+        if primary in by_code:
+            by_code[str(primary)]["is_core"] = True
+
+        core = [c for c in concepts if c.get("is_core") is True]
+        if len(core) < 3:
+            for concept in concepts:
+                if concept.get("is_core") is not True:
+                    concept["is_core"] = True
+                    core.append(concept)
+                    if len(core) >= 3:
+                        break
+
+        core = [c for c in concepts if c.get("is_core") is True]
+        if len(core) > 6:
+            keep_codes: list[str] = []
+            if primary in by_code:
+                keep_codes.append(str(primary))
+            for concept in concepts:
+                code = str(concept.get("code") or "")
+                if concept.get("is_core") is True and code not in keep_codes:
+                    keep_codes.append(code)
+                if len(keep_codes) >= 6:
+                    break
+            keep = set(keep_codes[:6])
+            for concept in concepts:
+                concept["is_core"] = str(concept.get("code") or "") in keep
+
+    # Ensure Evaluate metadata covers the primary concept when a generated question
+    # already clearly asks about it. This removes harmless tagging drift while
+    # refusing to fabricate a new question when primary coverage is genuinely absent.
+    _repair_primary_question_mapping(normalized)
 
     return normalized
 
@@ -290,11 +417,12 @@ Return this exact top-level shape:
 
 QUALITY REQUIREMENTS
 - concepts: 4–8 concepts; 3–6 should be core. Codes must use canonical dotted identifiers: BIO.<DOMAIN>.<CONCEPT> (for example BIO.GENE.EXPRESSION). Never use BIO_GENE, BIO-GENE, spaces, or other separators.
-- relations: 2–8 meaningful relationships among returned concepts.
+- relations: 2–8 meaningful relationships among returned concepts. Every source_code and target_code must exactly match a code returned in concepts, and source_code must never equal target_code.
 - Prepare: 2–4 measurable outcomes and exactly 3 prerequisite/diagnostic items. Diagnostic items test prerequisite/readiness, not the whole lesson.
 - Diagnostic MCQ uses expected as an option key string such as "A". Diagnostic true_false MUST use JSON boolean expected: true or false (never "true", "false", "Đúng", or "Sai") and options=[].
 - Work: exactly 3 learner-owned tasks in both languages with matching task codes. Tasks should require explanation, comparison, analysis, interpretation, or application as supported by the source; never simply ask the learner to copy text.
 - Questions: 8–10 source-grounded items, at least 3 MCQ and 3 true/false. Add short_answer only when a short canonical answer is genuinely unambiguous. MCQ has exactly 4 options with one correct option. true_false uses answer_json {{"value":true/false}} and options=[]. short_answer uses answer_json {{"value":"..."}} and options=[].
+- Evaluate MUST directly assess policy.primary_concept_code in at least one question: at least one questions[].concept_code must exactly equal policy.primary_concept_code, and that question stem must genuinely assess that concept.
 - Difficulty should be mixed. Avoid trick wording.
 - Vietnamese wording is primary; English is a faithful learning translation, not an expansion.
 
@@ -477,6 +605,148 @@ def validate_power_draft(payload: dict[str, Any]) -> dict[str, Any]:
     return {"valid": not errors, "errors": errors, "warnings": warnings}
 
 
+
+def _norm_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip().lower())
+
+
+def assess_power_draft(
+    payload: dict[str, Any],
+    *,
+    stored_fingerprint: str | None = None,
+    current_fingerprint: str | None = None,
+    source_chars: int | None = None,
+) -> dict[str, Any]:
+    """Run deterministic QA on a generated POWER package.
+
+    This is deliberately stricter than schema validation but does not try to
+    replace human pedagogical review. A QA pass means the package is internally
+    coherent, current with its source, and safe for batch activation.
+    """
+    normalized = normalize_power_draft_payload(payload)
+    validation = validate_power_draft(normalized)
+    errors = list(validation["errors"])
+    warnings = list(validation["warnings"])
+
+    if stored_fingerprint and current_fingerprint and stored_fingerprint != current_fingerprint:
+        errors.append("source fingerprint changed since draft generation")
+
+    if source_chars is not None and source_chars < 1000:
+        warnings.append("source context is short (<1000 chars); manual review recommended")
+
+    questions = normalized.get("questions") or []
+    stems_vi = [_norm_text(q.get("stem_vi")) for q in questions if isinstance(q, dict)]
+    duplicate_stems = sorted({x for x in stems_vi if x and stems_vi.count(x) > 1})
+    if duplicate_stems:
+        errors.append(f"duplicate Vietnamese question stems: {len(duplicate_stems)}")
+
+    work_vi = ((normalized.get("work") or {}).get("vi") or {}).get("tasks") or []
+    work_prompts = [_norm_text(t.get("prompt")) for t in work_vi if isinstance(t, dict)]
+    duplicate_work = sorted({x for x in work_prompts if x and work_prompts.count(x) > 1})
+    if duplicate_work:
+        errors.append(f"duplicate Work prompts: {len(duplicate_work)}")
+
+    qtypes: dict[str, int] = {}
+    difficulties: dict[str, int] = {}
+    cognitive: dict[str, int] = {}
+    concept_refs: set[str] = set()
+    for q in questions:
+        if not isinstance(q, dict):
+            continue
+        for bucket, key in ((qtypes, "question_type"), (difficulties, "difficulty"), (cognitive, "cognitive_level")):
+            value = str(q.get(key) or "")
+            bucket[value] = bucket.get(value, 0) + 1
+        if q.get("concept_code"):
+            concept_refs.add(str(q["concept_code"]))
+
+    concepts = normalized.get("concepts") or []
+    core_codes = {str(c.get("code")) for c in concepts if isinstance(c, dict) and c.get("is_core") is True}
+    primary = str(((normalized.get("policy") or {}).get("primary_concept_code")) or "")
+    primary_assessed_count = sum(
+        1 for q in questions
+        if isinstance(q, dict) and str(q.get("concept_code") or "") == primary
+    ) if primary else 0
+    if primary and primary_assessed_count == 0:
+        errors.append("primary concept must be directly assessed by at least one Evaluate question")
+    if len(concept_refs) < min(2, len(core_codes)):
+        warnings.append("Evaluate questions cover fewer than 2 concepts")
+    if len([k for k, v in difficulties.items() if k and v]) < 2:
+        warnings.append("Evaluate questions use only one difficulty level")
+    if len([k for k, v in cognitive.items() if k and v]) < 2:
+        warnings.append("Evaluate questions use only one cognitive level")
+
+    metrics = {
+        "concept_count": len(concepts),
+        "core_concept_count": len(core_codes),
+        "relation_count": len(normalized.get("relations") or []),
+        "question_count": len(questions),
+        "question_types": qtypes,
+        "difficulty_mix": difficulties,
+        "cognitive_mix": cognitive,
+        "assessed_concepts": sorted(concept_refs),
+        "primary_assessed_count": primary_assessed_count,
+        "work_task_count": len(work_vi),
+        "source_chars": source_chars,
+        "source_fingerprint_current": (not stored_fingerprint or not current_fingerprint or stored_fingerprint == current_fingerprint),
+    }
+    return {
+        "passed": not errors,
+        "errors": errors,
+        "warnings": warnings,
+        "metrics": metrics,
+        "normalized_payload": normalized,
+    }
+
+
+def qa_latest_draft(db: Session, unit_code: str) -> dict[str, Any]:
+    draft = latest_draft(db, unit_code)
+    context = load_unit_source_context(db, unit_code)
+    qa = assess_power_draft(
+        draft["payload_json"],
+        stored_fingerprint=draft.get("source_fingerprint"),
+        current_fingerprint=context.fingerprint,
+        source_chars=len(context.text),
+    )
+    validation = validate_power_draft(qa["normalized_payload"])
+    qa_status = "passed" if qa["passed"] else "failed"
+    draft_status = "validated" if validation["valid"] else "draft"
+    db.execute(
+        text(
+            """
+            UPDATE power_blueprint_drafts
+            SET payload_json=CAST(:payload AS jsonb),
+                validation_json=CAST(:validation AS jsonb),
+                status=:draft_status,
+                qa_status=:qa_status,
+                qa_json=CAST(:qa AS jsonb),
+                qa_checked_at=now(), updated_at=now()
+            WHERE id=CAST(:id AS uuid)
+            """
+        ),
+        {
+            "id": draft["id"],
+            "payload": json.dumps(qa["normalized_payload"], ensure_ascii=False),
+            "validation": json.dumps(validation, ensure_ascii=False),
+            "draft_status": draft_status,
+            "qa_status": qa_status,
+            "qa": json.dumps({k: v for k, v in qa.items() if k != "normalized_payload"}, ensure_ascii=False),
+        },
+    )
+    if not draft["is_power_ready"]:
+        db.execute(
+            text("UPDATE curriculum_units SET power_status=:status WHERE code=:code"),
+            {"status": draft_status, "code": unit_code},
+        )
+    return {
+        "unit_code": unit_code,
+        "draft_version": draft["version"],
+        "qa_status": qa_status,
+        "passed": qa["passed"],
+        "errors": qa["errors"],
+        "warnings": qa["warnings"],
+        "metrics": qa["metrics"],
+    }
+
 def save_draft(db: Session, *, unit_code: str, model: str, payload: dict[str, Any], fingerprint: str) -> dict[str, Any]:
     payload = normalize_power_draft_payload(payload)
     validation = validate_power_draft(payload)
@@ -522,6 +792,7 @@ def latest_draft(db: Session, unit_code: str) -> dict[str, Any]:
             """
             SELECT pbd.id::text AS id, pbd.version, pbd.status, pbd.payload_json,
                    pbd.validation_json, pbd.source_fingerprint, pbd.model,
+                   pbd.qa_status, pbd.qa_json, pbd.qa_checked_at,
                    cu.id::text AS curriculum_unit_id, cu.content_status, cu.is_power_ready,
                    cu.power_status, cu.name_vi, cu.name_en
             FROM power_blueprint_drafts pbd
@@ -542,12 +813,203 @@ def _safe_question_code(unit_code: str, index: int) -> str:
     return f"AUTO_{base}_Q{index:02d}"
 
 
+def _activation_option_params(question_id, option):
+    """Build safe DB params for question_options during activation.
+
+    Some normalized/QA-passed drafts can still have raw MCQ options without
+    `is_correct`. Activation must derive correctness from answer_json rather
+    than assuming the model persisted that boolean on every option.
+    """
+    def _boolish(value):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)) and value in (0, 1):
+            return bool(value)
+        if isinstance(value, str):
+            s = value.strip().lower()
+            if s in {"true", "1", "yes", "y", "đúng", "dung"}:
+                return True
+            if s in {"false", "0", "no", "n", "sai"}:
+                return False
+        return None
+
+    explicit = _boolish(option.get("is_correct"))
+    if explicit is not None:
+        is_correct = explicit
+    else:
+        answer = question.get("answer_json")
+
+        values = []
+        def _walk(x):
+            if isinstance(x, dict):
+                for v in x.values():
+                    _walk(v)
+            elif isinstance(x, (list, tuple)):
+                for v in x:
+                    _walk(v)
+            elif x is not None:
+                values.append(x)
+
+        _walk(answer)
+
+        option_key = str(option.get("key", "")).strip()
+        option_text_vi = str(option.get("text_vi", "")).strip()
+        option_text_en = str(option.get("text_en", "")).strip()
+
+        candidates = {
+            str(v).strip()
+            for v in values
+            if isinstance(v, (str, int, float, bool))
+        }
+
+        is_correct = (
+            (option_key and option_key in candidates)
+            or (option_text_vi and option_text_vi in candidates)
+            or (option_text_en and option_text_en in candidates)
+        )
+
+    return {
+        "qid": question_id,
+        "key": option.get("key"),
+        "text_vi": option.get("text_vi"),
+        "text_en": option.get("text_en"),
+        "is_correct": bool(is_correct),
+    }
+
+
+# V136_ACTIVATION_OPTION_HELPER
+def _activation_option_params(question_id, option):
+    """Return complete question_options params without relying on loop variable names."""
+    def _boolish(value):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)) and value in (0, 1):
+            return bool(value)
+        if isinstance(value, str):
+            s = value.strip().lower()
+            if s in {"true", "1", "yes", "y", "đúng", "dung"}:
+                return True
+            if s in {"false", "0", "no", "n", "sai"}:
+                return False
+        return None
+
+    explicit = _boolish(option.get("is_correct"))
+    if explicit is not None:
+        is_correct = explicit
+    else:
+        # Find the enclosing question object from the caller's local context.
+        # This deliberately avoids assuming that the loop variable is named
+        # `question`, `q`, `item`, etc.
+        import inspect
+
+        caller = inspect.currentframe().f_back
+        seen = set()
+
+        def _find_question(obj, depth=0):
+            if depth > 5:
+                return None
+            oid = id(obj)
+            if oid in seen:
+                return None
+            seen.add(oid)
+
+            if isinstance(obj, dict):
+                options = obj.get("options")
+                if isinstance(options, list):
+                    if any(candidate is option for candidate in options):
+                        return obj
+
+                for value in obj.values():
+                    if isinstance(value, (dict, list, tuple)):
+                        found = _find_question(value, depth + 1)
+                        if found is not None:
+                            return found
+
+            elif isinstance(obj, (list, tuple)):
+                for value in obj:
+                    if isinstance(value, (dict, list, tuple)):
+                        found = _find_question(value, depth + 1)
+                        if found is not None:
+                            return found
+
+            return None
+
+        enclosing_question = None
+        if caller is not None:
+            # First try direct local mappings; this is fast for the normal loop.
+            for value in caller.f_locals.values():
+                if isinstance(value, dict):
+                    options = value.get("options")
+                    if isinstance(options, list) and any(
+                        candidate is option for candidate in options
+                    ):
+                        enclosing_question = value
+                        break
+
+            # Fallback: search nested draft/payload structures in caller locals.
+            if enclosing_question is None:
+                for value in caller.f_locals.values():
+                    if isinstance(value, (dict, list, tuple)):
+                        found = _find_question(value)
+                        if found is not None:
+                            enclosing_question = found
+                            break
+
+        if enclosing_question is None:
+            raise ValueError(
+                "Activation could not locate the enclosing question for an MCQ "
+                "option missing is_correct."
+            )
+
+        answer = enclosing_question.get("answer_json")
+
+        values = []
+
+        def _walk(x):
+            if isinstance(x, dict):
+                for v in x.values():
+                    _walk(v)
+            elif isinstance(x, (list, tuple)):
+                for v in x:
+                    _walk(v)
+            elif x is not None:
+                values.append(x)
+
+        _walk(answer)
+
+        candidates = {
+            str(v).strip()
+            for v in values
+            if isinstance(v, (str, int, float, bool))
+        }
+
+        option_key = str(option.get("key", "")).strip()
+        option_text_vi = str(option.get("text_vi", "")).strip()
+        option_text_en = str(option.get("text_en", "")).strip()
+
+        is_correct = (
+            (option_key and option_key in candidates)
+            or (option_text_vi and option_text_vi in candidates)
+            or (option_text_en and option_text_en in candidates)
+        )
+
+    return {
+        "qid": question_id,
+        "key": option.get("key"),
+        "text_vi": option.get("text_vi"),
+        "text_en": option.get("text_en"),
+        "is_correct": bool(is_correct),
+    }
+
+
 def activate_latest_draft(db: Session, unit_code: str, *, force: bool = False) -> dict[str, Any]:
     draft = latest_draft(db, unit_code)
     payload = normalize_power_draft_payload(draft["payload_json"])
     validation = validate_power_draft(payload)
     if not validation["valid"]:
         raise ValueError("Draft is not valid: " + "; ".join(validation["errors"]))
+    if draft.get("qa_status") != "passed" and not force:
+        raise ValueError("Draft has not passed v1.3 QA; run build_power.py qa --unit ... first, or use --force")
     if draft["content_status"] != "ingested":
         raise ValueError("Unit content is not ingested")
     if draft["is_power_ready"] and not force:
@@ -683,7 +1145,7 @@ def activate_latest_draft(db: Session, unit_code: str, *, force: bool = False) -
                     VALUES (:qid,:key,:text_vi,:text_en,:is_correct)
                     """
                 ),
-                {"qid": question_id, **option},
+                _activation_option_params(question_id, option),
             )
         db.execute(text("DELETE FROM question_concepts WHERE question_id=:id"), {"id": question_id})
         db.execute(
