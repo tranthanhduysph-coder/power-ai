@@ -264,6 +264,9 @@ export default function LearnPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [tutorProvider, setTutorProvider] = useState<string | null>(null);
   const [retrievalCount, setRetrievalCount] = useState<number | null>(null);
+  const [attachedImage, setAttachedImage] = useState<{ name: string; dataUrl: string } | null>(null);
+  const [generatedImage, setGeneratedImage] = useState<string | null>(null);
+  const [imageBusy, setImageBusy] = useState(false);
 
   const hydratePowerSession = (ps: PowerSession) => {
     setSession(ps);
@@ -297,6 +300,8 @@ export default function LearnPage() {
     setBlocks([]);
     setTutorProvider(null);
     setRetrievalCount(null);
+    setAttachedImage(null);
+    setGeneratedImage(null);
   };
 
   const loadRethinkBlueprint = async (sessionId: string) => {
@@ -532,27 +537,81 @@ export default function LearnPage() {
     }
   };
 
+  const attachTutorImage = (file: File | null) => {
+    if (!file) return;
+    const allowed = ["image/png", "image/jpeg", "image/webp"];
+    if (!allowed.includes(file.type)) {
+      setNotice(language === "vi" ? "Chỉ hỗ trợ ảnh PNG, JPEG hoặc WebP." : "Only PNG, JPEG, or WebP images are supported.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setNotice(language === "vi" ? "Ảnh phải nhỏ hơn hoặc bằng 5 MB." : "The image must be 5 MB or smaller.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        setAttachedImage({ name: file.name, dataUrl: reader.result });
+        setNotice(null);
+      }
+    };
+    reader.onerror = () => setNotice(language === "vi" ? "Không đọc được ảnh." : "Unable to read the image.");
+    reader.readAsDataURL(file);
+  };
+
   const askTutor = async () => {
-    if (!message.trim() || !session) return;
+    if ((!message.trim() && !attachedImage) || !session) return;
     setBusy(true);
+    setNotice(null);
     try {
+      const tutorMessage = message.trim() || (language === "vi" ? "Hãy phân tích hình ảnh Sinh học này và giúp tôi hiểu nó." : "Analyze this Biology image and help me understand it.");
       const res = await apiFetch<{ provider: string; phase: Phase; blocks: PowerTutorBlock[]; retrieval: { count: number } }>("/tutor/respond", {
         method: "POST",
         body: JSON.stringify({
           concept_code: unitDetail?.primary_concept_code || undefined,
-          message,
+          message: tutorMessage,
           language,
           power_session_id: session.id,
           phase: viewPhase,
+          image_data_url: attachedImage?.dataUrl || null,
         }),
       });
       setBlocks(res.blocks);
       setTutorProvider(res.provider);
       setRetrievalCount(res.retrieval?.count ?? 0);
+      setAttachedImage(null);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to ask POWER Tutor");
     } finally {
       setBusy(false);
     }
   };
+
+  const generateTutorImage = async () => {
+    if (!message.trim() || !session) return;
+    setImageBusy(true);
+    setNotice(null);
+    try {
+      const res = await apiFetch<{ provider: string; model: string; phase: Phase; image_data_url: string; retrieval: { count: number } }>("/tutor/generate-image", {
+        method: "POST",
+        body: JSON.stringify({
+          concept_code: unitDetail?.primary_concept_code || undefined,
+          prompt: message.trim(),
+          language,
+          power_session_id: session.id,
+          phase: viewPhase,
+        }),
+      });
+      setGeneratedImage(res.image_data_url);
+      setTutorProvider(res.provider);
+      setRetrievalCount(res.retrieval?.count ?? 0);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to generate image");
+    } finally {
+      setImageBusy(false);
+    }
+  };
+
 
   const openPhase = (target: Phase) => {
     if (!session?.phases?.[target] && target !== phase) return;
@@ -560,6 +619,8 @@ export default function LearnPage() {
     setBlocks([]);
     setTutorProvider(null);
     setRetrievalCount(null);
+    setAttachedImage(null);
+    setGeneratedImage(null);
     setNotice(target === phase
       ? null
       : (language === "vi" ? `Bạn đang xem lại pha ${target}. Tiến trình hiện tại vẫn ở ${phase}.` : `You are reviewing ${target}. Your current progression remains at ${phase}.`));
@@ -1004,8 +1065,25 @@ export default function LearnPage() {
             {tutorProvider && <div><span className="pill">{tutorProvider === "openai" ? "OpenAI" : "Mock"}</span> <span className="muted">{language === "vi" ? `Retrieval: ${retrievalCount ?? 0} đoạn` : `Retrieval: ${retrievalCount ?? 0} chunks`}</span></div>}
             {tutorProvider === "mock" && <p className="muted">{language === "vi" ? "Tutor đang chạy mock mode. Hãy dùng AI_PROVIDER=openai để kiểm thử Tutor thật." : "Tutor is running in mock mode. Use AI_PROVIDER=openai to test the real Tutor."}</p>}
             <div className="quick-actions">{quickActions.map((x) => <button key={x} onClick={() => setMessage(x)}>{x}</button>)}</div>
+            <div className="quick-actions">
+              <label className="button secondary" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                {language === "vi" ? "Đính kèm ảnh" : "Attach image"}
+                <input type="file" accept="image/png,image/jpeg,image/webp" style={{ display: "none" }} onChange={(e) => attachTutorImage(e.target.files?.[0] || null)} />
+              </label>
+              <button type="button" className="button secondary" disabled={!message.trim() || !session || imageBusy} onClick={generateTutorImage}>
+                {imageBusy ? "…" : (language === "vi" ? "Tạo hình minh họa" : "Generate illustration")}
+              </button>
+            </div>
+            {attachedImage && <div className="review-banner" style={{ margin: "0 0 12px" }}>
+              <strong>{language === "vi" ? "Ảnh đã đính kèm:" : "Attached image:"}</strong> {attachedImage.name}
+              <button type="button" className="text-button" style={{ marginLeft: 10 }} onClick={() => setAttachedImage(null)}>{language === "vi" ? "Bỏ ảnh" : "Remove"}</button>
+            </div>}
             {blocks.length > 0 && <PowerTutorRenderer blocks={blocks} />}
-            <div className="tutor-input"><textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder={language === "vi" ? `Hỏi POWER trong pha ${viewPhase}…` : `Ask POWER during ${viewPhase}…`} /><button className="button primary" disabled={busy || !session} onClick={askTutor}>{busy ? "…" : (language === "vi" ? "Gửi" : "Send")}</button></div>
+            {generatedImage && <div style={{ marginTop: 12 }}>
+              <img src={generatedImage} alt={language === "vi" ? "Hình minh họa Sinh học do AI tạo" : "AI-generated Biology illustration"} style={{ width: "100%", maxHeight: 320, objectFit: "contain", borderRadius: 12, border: "1px solid var(--line)" }} />
+              <button type="button" className="text-button" style={{ marginTop: 6 }} onClick={() => setGeneratedImage(null)}>{language === "vi" ? "Ẩn hình" : "Hide image"}</button>
+            </div>}
+            <div className="tutor-input"><textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder={language === "vi" ? `Hỏi POWER trong pha ${viewPhase}… Bạn cũng có thể đính kèm ảnh.` : `Ask POWER during ${viewPhase}… You can also attach an image.`} /><button className="button primary" disabled={busy || !session || (!message.trim() && !attachedImage)} onClick={askTutor}>{busy ? "…" : (language === "vi" ? "Gửi" : "Send")}</button></div>
           </aside>
         </div>}
       </AppShell>

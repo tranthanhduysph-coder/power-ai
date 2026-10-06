@@ -67,10 +67,13 @@ def grounded_tutor_blocks(
     retrieved: list[Any],
     phase: str = "WORK",
     learner_context: dict[str, Any] | None = None,
+    image_data_url: str | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
     settings = get_settings()
     if settings.ai_provider != "openai":
         return "mock", mock_tutor_blocks(language, message)
+    if image_data_url and not settings.tutor_vision_enabled:
+        raise RuntimeError("Tutor image analysis is disabled")
     if not settings.openai_api_key:
         raise RuntimeError("OPENAI_API_KEY is required when AI_PROVIDER=openai")
 
@@ -91,9 +94,11 @@ def grounded_tutor_blocks(
     learner_context = learner_context or {}
     if language == "en":
         base = (
-            "Answer the learner in English using only the supplied textbook context. "
-            "If the context is insufficient, say that the source currently available is insufficient. "
-            "Do not invent citations. "
+            "Answer the learner in English using the supplied textbook context"
+            + (" and the learner-provided image" if image_data_url else "")
+            + ". If the context is insufficient for a biological claim, say so. "
+            + ("You may describe visible image features, but do not invent biological details that are not supported by the image or source context. " if image_data_url else "")
+            + "Do not invent citations. "
         )
         phase_rule = {
             "PREPARE": "The learner is in PREPARE. Clarify prior knowledge and goals; avoid doing the whole lesson for them. Give at most one short explanation, then ask one focused readiness question.",
@@ -104,8 +109,11 @@ def grounded_tutor_blocks(
         }.get(phase, "Explain the biology clearly and concisely.")
     else:
         base = (
-            "Trả lời người học bằng tiếng Việt, chỉ dựa trên ngữ cảnh SGK/tài liệu được cung cấp. "
-            "Nếu ngữ cảnh chưa đủ, nói rõ nguồn hiện có chưa đủ. Không tự tạo trích dẫn. "
+            "Trả lời người học bằng tiếng Việt dựa trên ngữ cảnh SGK/tài liệu được cung cấp"
+            + (" và hình ảnh do người học gửi" if image_data_url else "")
+            + ". Nếu ngữ cảnh chưa đủ cho một kết luận Sinh học, hãy nói rõ. "
+            + ("Có thể mô tả những gì nhìn thấy trong hình nhưng không suy diễn chi tiết Sinh học ngoài bằng chứng từ hình hoặc nguồn. " if image_data_url else "")
+            + "Không tự tạo trích dẫn. "
         )
         phase_rule = {
             "PREPARE": "Người học đang ở PREPARE. Hãy làm rõ kiến thức nền và mục tiêu; không giảng thay toàn bộ bài. Chỉ giải thích rất ngắn khi cần rồi đặt một câu hỏi kiểm tra sẵn sàng học tập.",
@@ -134,15 +142,77 @@ def grounded_tutor_blocks(
     from openai import OpenAI
 
     client = OpenAI(api_key=settings.openai_api_key)
+    prompt_text = (
+        f"{instruction}\n\nPOWER PHASE: {phase}\nLEARNER CONTEXT: {learner_context}"
+        f"\n\nLEARNER QUESTION:\n{message}\n\nSOURCE CONTEXT:\n{context}"
+    )
+    content: list[dict[str, Any]] = [{"type": "input_text", "text": prompt_text}]
+    if image_data_url:
+        content.append({"type": "input_image", "image_url": image_data_url, "detail": "auto"})
+
     response = client.responses.create(
         model=settings.tutor_model,
-        input=[
-            {
-                "role": "user",
-                "content": (
-                    f"{instruction}\n\nPOWER PHASE: {phase}\nLEARNER CONTEXT: {learner_context}\n\nLEARNER QUESTION:\n{message}\n\nSOURCE CONTEXT:\n{context}"
-                ),
-            }
-        ],
+        input=[{"role": "user", "content": content}],
     )
     return "openai", [{"type": "text", "content": response.output_text.strip()}]
+
+
+def generate_grounded_image(
+    *,
+    language: str,
+    prompt: str,
+    retrieved: list[Any],
+) -> tuple[str, str]:
+    settings = get_settings()
+    if settings.ai_provider != "openai":
+        raise RuntimeError("Image generation requires AI_PROVIDER=openai")
+    if not settings.openai_api_key:
+        raise RuntimeError("OPENAI_API_KEY is required for image generation")
+
+    context_parts: list[str] = []
+    total_chars = 0
+    for item in retrieved:
+        if total_chars >= 7000:
+            break
+        page = (
+            f"{item.page_start}"
+            if item.page_start == item.page_end or item.page_end is None
+            else f"{item.page_start}-{item.page_end}"
+        )
+        excerpt = (item.text or "")[: max(0, 7000 - total_chars)]
+        context_parts.append(
+            f"SOURCE={item.source_code}; PDF_PAGE={page}; SECTION={item.section_title or ''}\n{excerpt}"
+        )
+        total_chars += len(excerpt)
+    context = "\n\n---\n\n".join(context_parts)
+    if not context:
+        raise ValueError("No grounded source context is available for image generation")
+
+    if language == "en":
+        full_prompt = (
+            "Create a scientifically accurate educational Biology illustration for a secondary-school learner. "
+            "Use the source context below as the factual basis. Prefer a clean textbook-style diagram or explanatory illustration, "
+            "with minimal labels, no decorative text, no watermark, and no unsupported details. "
+            f"Learner request: {prompt}\n\nSOURCE CONTEXT:\n{context}"
+        )
+    else:
+        full_prompt = (
+            "Tạo một hình minh họa Sinh học chính xác về mặt khoa học cho học sinh trung học. "
+            "Dùng ngữ cảnh nguồn dưới đây làm cơ sở nội dung. Ưu tiên sơ đồ hoặc hình giải thích sạch, kiểu sách giáo khoa, "
+            "ít nhãn, không thêm chữ trang trí, không watermark và không thêm chi tiết không được nguồn hỗ trợ. "
+            f"Yêu cầu của người học: {prompt}\n\nNGỮ CẢNH NGUỒN:\n{context}"
+        )
+
+    from openai import OpenAI
+
+    client = OpenAI(api_key=settings.openai_api_key)
+    result = client.images.generate(
+        model=settings.image_model,
+        prompt=full_prompt,
+        size="1024x1024",
+        quality="medium",
+    )
+    image_base64 = result.data[0].b64_json if result.data else None
+    if not image_base64:
+        raise RuntimeError("OpenAI returned no image data")
+    return settings.image_model, f"data:image/png;base64,{image_base64}"

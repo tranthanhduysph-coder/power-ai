@@ -23,6 +23,7 @@ type Generated = {
   mode: string;
   purpose: "standalone" | "evaluate";
   power_session_id?: string | null;
+  unit_code?: string;
   questions: PracticeQuestion[];
 };
 
@@ -62,7 +63,7 @@ type Result = {
 export default function PracticePage() {
   const { language } = useLanguage();
   const { user, devMode, loading: authLoading } = useAuth();
-  const [mode, setMode] = useState<"custom" | "adaptive">("adaptive");
+  const [mode, setMode] = useState<"custom" | "adaptive" | "ai">("adaptive");
   const [difficulty, setDifficulty] = useState("auto");
   const [count, setCount] = useState(6);
   const [types, setTypes] = useState(["mcq", "true_false", "short_answer"]);
@@ -75,6 +76,7 @@ export default function PracticePage() {
   const [purpose, setPurpose] = useState<"standalone" | "evaluate">("standalone");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [aiInstruction, setAiInstruction] = useState("");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -99,6 +101,17 @@ export default function PracticePage() {
 
   const toggleType = (type: string) => setTypes((old) => old.includes(type) ? old.filter((x) => x !== type) : [...old, type]);
 
+  const selectMode = (nextMode: "custom" | "adaptive" | "ai") => {
+    if (purpose === "evaluate" && nextMode === "ai") return;
+    setMode(nextMode);
+    if (nextMode === "adaptive") {
+      setDifficulty("auto");
+      setCount(6);
+      setTypes(["mcq", "true_false", "short_answer"]);
+      setAiInstruction("");
+    }
+  };
+
   const generate = async () => {
     setBusy(true);
     setNotice(null);
@@ -114,8 +127,10 @@ export default function PracticePage() {
           question_count: count,
           power_session_id: purpose === "evaluate" ? powerSessionId : null,
           purpose,
+          ai_instruction: mode === "ai" ? aiInstruction.trim() || null : null,
         }),
       });
+      if (res.unit_code) setUnitCode(res.unit_code);
       setGenerated(res);
       setAnswers({});
     } catch (error) {
@@ -149,6 +164,7 @@ export default function PracticePage() {
   };
 
   const evaluateMode = purpose === "evaluate";
+  const configLocked = mode === "adaptive";
 
   return (
     <AuthGuard>
@@ -165,28 +181,37 @@ export default function PracticePage() {
 
         {!generated && <section className="practice-builder card">
           <div className="mode-grid">
-            <button className={mode === "adaptive" ? "mode-card active" : "mode-card"} onClick={() => setMode("adaptive")}>
+            <button className={mode === "adaptive" ? "mode-card active" : "mode-card"} onClick={() => selectMode("adaptive")}>
               <strong>{language === "vi" ? "Phù hợp với tôi" : "Recommended for me"}</strong>
               <span>{language === "vi" ? "Ưu tiên khái niệm còn yếu dựa trên mastery hiện tại." : "Prioritize weak concepts from current mastery."}</span>
             </button>
-            <button className={mode === "custom" ? "mode-card active" : "mode-card"} onClick={() => setMode("custom")}>
+            <button className={mode === "custom" ? "mode-card active" : "mode-card"} onClick={() => selectMode("custom")}>
               <strong>{language === "vi" ? "Tự chọn" : "Custom"}</strong>
               <span>{language === "vi" ? "Chọn mức độ và dạng câu hỏi." : "Choose difficulty and question formats."}</span>
             </button>
+            <button disabled={evaluateMode} className={mode === "ai" ? "mode-card active" : "mode-card"} onClick={() => selectMode("ai")}>
+              <strong>{language === "vi" ? "Tạo bài luyện bằng AI" : "AI-generated practice"}</strong>
+              <span>{language === "vi" ? "Tạo bộ luyện mới theo yêu cầu; không dùng để cập nhật mastery hay POWER Evaluate." : "Create a new practice set on demand; it does not update mastery or POWER Evaluate."}</span>
+            </button>
           </div>
           <div className="form-grid">
-            <label>{language === "vi" ? "Nội dung" : "Topic"}<select value={unitCode} disabled={evaluateMode} onChange={(e) => setUnitCode(e.target.value)}>{readyUnits.length > 0 ? readyUnits.map((unit) => <option key={unit.code} value={unit.code}>{language === "vi" ? `Sinh học ${unit.grade} · ${unit.name_vi}` : `Biology ${unit.grade} · ${unit.name_en}`}</option>) : <option value={unitCode}>{unitCode}</option>}</select></label>
-            <label>{language === "vi" ? "Mức độ khó" : "Difficulty"}<select value={difficulty} onChange={(e) => setDifficulty(e.target.value)}><option value="auto">Adaptive / Auto</option><option value="easy">Easy</option><option value="medium">Medium</option><option value="hard">Hard</option></select></label>
-            <label>{language === "vi" ? "Số câu" : "Questions"}<select value={count} onChange={(e) => setCount(Number(e.target.value))}><option>3</option><option>6</option><option>9</option><option>12</option></select></label>
+            <label>{language === "vi" ? "Nội dung" : "Topic"}<select value={unitCode} disabled={evaluateMode || configLocked} onChange={(e) => setUnitCode(e.target.value)}>{readyUnits.length > 0 ? readyUnits.map((unit) => <option key={unit.code} value={unit.code}>{language === "vi" ? `Sinh học ${unit.grade} · ${unit.name_vi}` : `Biology ${unit.grade} · ${unit.name_en}`}</option>) : <option value={unitCode}>{unitCode}</option>}</select></label>
+            <label>{language === "vi" ? "Mức độ khó" : "Difficulty"}<select value={difficulty} disabled={configLocked} onChange={(e) => setDifficulty(e.target.value)}><option value="auto">Adaptive / Auto</option><option value="easy">Easy</option><option value="medium">Medium</option><option value="hard">Hard</option></select></label>
+            <label>{language === "vi" ? "Số câu" : "Questions"}<select value={count} disabled={configLocked} onChange={(e) => setCount(Number(e.target.value))}><option>3</option><option>6</option><option>9</option><option>12</option></select></label>
           </div>
           <div className="check-row">
-            {[["mcq", language === "vi" ? "Trắc nghiệm" : "Multiple choice"], ["true_false", language === "vi" ? "Đúng/Sai" : "True/False"], ["short_answer", language === "vi" ? "Trả lời ngắn" : "Short answer"]].map(([value, label]) => <label key={value}><input type="checkbox" checked={types.includes(value)} onChange={() => toggleType(value)} /> {label}</label>)}
+            {[["mcq", language === "vi" ? "Trắc nghiệm" : "Multiple choice"], ["true_false", language === "vi" ? "Đúng/Sai" : "True/False"], ["short_answer", language === "vi" ? "Trả lời ngắn" : "Short answer"]].map(([value, label]) => <label key={value}><input type="checkbox" disabled={configLocked} checked={types.includes(value)} onChange={() => toggleType(value)} /> {label}</label>)}
           </div>
+          {mode === "ai" && <label className="field-block">
+            <span>{language === "vi" ? "Yêu cầu cho AI (không bắt buộc)" : "Instructions for AI (optional)"}</span>
+            <textarea value={aiInstruction} maxLength={800} onChange={(e) => setAiInstruction(e.target.value)} placeholder={language === "vi" ? "Ví dụ: tập trung vào operon Lac, ưu tiên câu vận dụng và tránh câu hỏi ghi nhớ đơn thuần." : "Example: focus on the lac operon, emphasize application, and avoid simple recall questions."} />
+          </label>}
           <button className="button primary inline" disabled={types.length === 0 || busy} onClick={generate}>{busy ? "…" : (language === "vi" ? "Tạo bộ đánh giá" : "Generate evaluation")}</button>
         </section>}
 
         {generated && <section className="question-list">
           <div className="section-toolbar"><strong>{generated.questions.length} {language === "vi" ? "câu hỏi" : "questions"}</strong>{!result && <button className="text-button" onClick={() => setGenerated(null)}>{language === "vi" ? "Tạo lại" : "Rebuild"}</button>}</div>
+          {generated.mode === "ai" && <p className="muted">{language === "vi" ? "Bộ này được AI tạo theo yêu cầu để luyện tập. Kết quả không làm thay đổi mastery và không được dùng làm bằng chứng POWER Evaluate." : "This set was generated by AI for practice. Its result does not change mastery and is not used as POWER Evaluate evidence."}</p>}
           {generated.questions.map((q, index) => {
             const explanation = result?.results.find((r) => r.question_id === q.id);
             return <div className="question-card" key={q.id}>

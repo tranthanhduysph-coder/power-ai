@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     content_model: str = "gpt-5.6-luna"
     vision_provider: str = "disabled"
     vision_model: str = "gpt-5.6-luna"
+    tutor_vision_enabled: bool = True
+    image_model: str = "gpt-image-2"
     vision_min_text_chars: int = 80
     vision_render_scale: float = 2.0
     vision_cache_dir: str = "storage/ingestion-cache"
