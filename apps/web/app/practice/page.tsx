@@ -206,7 +206,7 @@ export default function PracticePage() {
             <span>{language === "vi" ? "Yêu cầu cho AI (không bắt buộc)" : "Instructions for AI (optional)"}</span>
             <textarea value={aiInstruction} maxLength={800} onChange={(e) => setAiInstruction(e.target.value)} placeholder={language === "vi" ? "Ví dụ: tập trung vào operon Lac, ưu tiên câu vận dụng và tránh câu hỏi ghi nhớ đơn thuần." : "Example: focus on the lac operon, emphasize application, and avoid simple recall questions."} />
           </label>}
-          <button className="button primary inline" disabled={types.length === 0 || busy} onClick={generate}>{busy ? "…" : (language === "vi" ? "Tạo bộ đánh giá" : "Generate evaluation")}</button>
+          <button className="button primary inline" disabled={types.length === 0 || busy} onClick={generate}>{busy ? "…" : (evaluateMode ? (language === "vi" ? "Tạo bộ đánh giá" : "Generate evaluation") : (language === "vi" ? "Tạo bài luyện" : "Generate practice"))}</button>
         </section>}
 
         {generated && <section className="question-list">
