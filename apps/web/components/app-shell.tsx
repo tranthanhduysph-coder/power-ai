@@ -14,6 +14,7 @@ const nav = [
   ["/learn", "Học", "Learn"],
   ["/practice", "Luyện tập", "Practice"],
   ["/progress", "Tiến trình", "Progress"],
+  ["/help", "Hướng dẫn sử dụng", "User guide"],
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
