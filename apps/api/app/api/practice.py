@@ -11,12 +11,13 @@ from app.core.auth import CurrentUser, get_current_user
 from app.db.session import get_db
 from app.services.evaluate import summarize_evaluation
 from app.services.mastery import update_mastery
+from app.services.ai_practice import generate_ai_practice_items
 
 router = APIRouter(tags=["practice"])
 
 
 class GeneratePractice(BaseModel):
-    mode: Literal["custom", "adaptive"] = "custom"
+    mode: Literal["custom", "adaptive", "ai"] = "custom"
     unit_code: str = "B12_DNA_REPLICATION"
     difficulty: Literal["auto", "easy", "medium", "hard"] = "auto"
     question_types: list[Literal["mcq", "true_false", "short_answer"]] = Field(
@@ -25,11 +26,14 @@ class GeneratePractice(BaseModel):
     question_count: int = Field(default=6, ge=3, le=20)
     power_session_id: UUID | None = None
     purpose: Literal["standalone", "evaluate"] = "standalone"
+    ai_instruction: str | None = Field(default=None, max_length=800)
 
     @model_validator(mode="after")
     def evaluate_requires_power_session(self):
         if self.purpose == "evaluate" and not self.power_session_id:
             raise ValueError("power_session_id is required for Evaluate practice")
+        if self.purpose == "evaluate" and self.mode == "ai":
+            raise ValueError("AI-generated questions are not allowed in POWER Evaluate")
         return self
 
 
@@ -66,6 +70,52 @@ def public_question(row: dict, options: list[dict]) -> dict:
     }
 
 
+def public_ai_question(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(item["id"]),
+        "code": item["code"],
+        "question_type": item["question_type"],
+        "difficulty": item["difficulty"],
+        "cognitive_level": item["cognitive_level"],
+        "stem_vi": item["stem_vi"],
+        "stem_en": item["stem_en"],
+        "options": item.get("options") or [],
+    }
+
+
+def _recommended_unit(db: Session, user_id: UUID, fallback_code: str) -> dict[str, Any] | None:
+    row = db.execute(
+        text(
+            """
+            SELECT cu.id, cu.code,
+                   COUNT(cm.concept_id) AS evidence_count,
+                   AVG(COALESCE(cm.mastery_score, 0.50)) AS average_mastery
+            FROM curriculum_units cu
+            JOIN curriculum_concepts cc ON cc.curriculum_unit_id = cu.id
+            LEFT JOIN concept_mastery cm
+              ON cm.concept_id = cc.concept_id AND cm.user_id = :user_id
+            WHERE cu.catalog_visible = true
+              AND cu.is_power_ready = true
+              AND cu.lesson_number IS NOT NULL
+            GROUP BY cu.id, cu.code
+            HAVING COUNT(cm.concept_id) > 0
+            ORDER BY AVG(COALESCE(cm.mastery_score, 0.50)) ASC,
+                     COUNT(cm.concept_id) DESC,
+                     cu.code
+            LIMIT 1
+            """
+        ),
+        {"user_id": user_id},
+    ).mappings().one_or_none()
+    if row:
+        return dict(row)
+    fallback = db.execute(
+        text("SELECT id, code FROM curriculum_units WHERE code = :code"),
+        {"code": fallback_code},
+    ).mappings().one_or_none()
+    return dict(fallback) if fallback else None
+
+
 def _validate_power_evaluate_context(
     db: Session,
     *,
@@ -96,11 +146,33 @@ def generate_practice(
     user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    unit = db.execute(
-        text("SELECT id FROM curriculum_units WHERE code = :code"), {"code": payload.unit_code}
-    ).scalar_one_or_none()
-    if not unit:
+    effective_difficulty = payload.difficulty
+    effective_types = list(payload.question_types)
+    effective_count = payload.question_count
+
+    if payload.mode == "adaptive":
+        effective_difficulty = "auto"
+        effective_types = ["mcq", "true_false", "short_answer"]
+        effective_count = 6
+        unit_row = (
+            _recommended_unit(db, user.id, payload.unit_code)
+            if payload.purpose == "standalone"
+            else db.execute(
+                text("SELECT id, code FROM curriculum_units WHERE code = :code"),
+                {"code": payload.unit_code},
+            ).mappings().one_or_none()
+        )
+    else:
+        unit_row = db.execute(
+            text("SELECT id, code FROM curriculum_units WHERE code = :code"),
+            {"code": payload.unit_code},
+        ).mappings().one_or_none()
+
+    if not unit_row:
         raise HTTPException(status_code=404, detail="Curriculum unit not found")
+
+    unit = unit_row["id"]
+    resolved_unit_code = str(unit_row["code"])
 
     if payload.purpose == "evaluate" and payload.power_session_id:
         _validate_power_evaluate_context(
@@ -110,17 +182,101 @@ def generate_practice(
             unit_id=unit,
         )
 
+    if payload.mode == "ai":
+        if payload.purpose != "standalone":
+            raise HTTPException(status_code=422, detail="AI-generated practice is standalone practice only")
+        try:
+            ai_model, ai_items, source_basis = generate_ai_practice_items(
+                db,
+                unit_id=unit,
+                difficulty=effective_difficulty,
+                question_types=effective_types,
+                question_count=effective_count,
+                instruction=payload.ai_instruction,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"AI practice generation failed: {exc}") from exc
+
+        set_id = db.execute(
+            text(
+                """
+                INSERT INTO practice_sets(
+                    user_id, mode, curriculum_unit_id, requested_difficulty, requested_count,
+                    power_session_id, purpose, generated_items
+                )
+                VALUES (:user_id, 'ai', :unit_id, :difficulty, :count, NULL, 'standalone', CAST(:items AS jsonb))
+                RETURNING id
+                """
+            ),
+            {
+                "user_id": user.id,
+                "unit_id": unit,
+                "difficulty": effective_difficulty,
+                "count": effective_count,
+                "items": json.dumps(ai_items, ensure_ascii=False),
+            },
+        ).scalar_one()
+
+        db.execute(
+            text(
+                """
+                INSERT INTO usage_ledger(user_id, feature, quantity, model, metadata)
+                VALUES (:user_id, 'ai_practice_openai', :quantity, :model, CAST(:metadata AS jsonb))
+                """
+            ),
+            {
+                "user_id": user.id,
+                "quantity": len(ai_items),
+                "model": ai_model,
+                "metadata": json.dumps(
+                    {
+                        "unit_code": resolved_unit_code,
+                        "difficulty": effective_difficulty,
+                        "question_types": effective_types,
+                        "instruction": (payload.ai_instruction or "")[:800],
+                        "source_basis": source_basis,
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        )
+        db.execute(
+            text(
+                """
+                INSERT INTO usage_ledger(user_id, feature, quantity, metadata)
+                VALUES (:user_id, 'practice_set', 1, CAST(:metadata AS jsonb))
+                """
+            ),
+            {
+                "user_id": user.id,
+                "metadata": json.dumps(
+                    {"mode": "ai", "count": len(ai_items), "purpose": "standalone"}
+                ),
+            },
+        )
+        db.commit()
+        return {
+            "practice_set_id": str(set_id),
+            "mode": "ai",
+            "purpose": "standalone",
+            "power_session_id": None,
+            "unit_code": resolved_unit_code,
+            "questions": [public_ai_question(item) for item in ai_items],
+        }
+
     params: dict[str, Any] = {
         "unit_id": unit,
-        "question_types": payload.question_types,
-        "limit": payload.question_count,
+        "question_types": effective_types,
+        "limit": effective_count,
         "user_id": user.id,
     }
 
     difficulty_clause = ""
-    if payload.difficulty != "auto":
+    if effective_difficulty != "auto":
         difficulty_clause = "AND q.difficulty = :difficulty"
-        params["difficulty"] = payload.difficulty
+        params["difficulty"] = effective_difficulty
 
     if payload.mode == "adaptive":
         sql = f"""
@@ -164,20 +320,22 @@ def generate_practice(
         raise HTTPException(status_code=422, detail="No matching questions in the current bank")
 
     set_id = db.execute(
-        text("""
+        text(
+            """
             INSERT INTO practice_sets(
                 user_id, mode, curriculum_unit_id, requested_difficulty, requested_count,
                 power_session_id, purpose
             )
             VALUES (:user_id, :mode, :unit_id, :difficulty, :count, :power_session_id, :purpose)
             RETURNING id
-        """),
+            """
+        ),
         {
             "user_id": user.id,
             "mode": payload.mode,
             "unit_id": unit,
-            "difficulty": payload.difficulty,
-            "count": payload.question_count,
+            "difficulty": effective_difficulty,
+            "count": effective_count,
             "power_session_id": payload.power_session_id,
             "purpose": payload.purpose,
         },
@@ -186,17 +344,26 @@ def generate_practice(
     questions = []
     for idx, row in enumerate(rows, start=1):
         db.execute(
-            text("INSERT INTO practice_set_items(practice_set_id, question_id, item_order) VALUES (:set_id, :qid, :ord)"),
+            text(
+                "INSERT INTO practice_set_items(practice_set_id, question_id, item_order) "
+                "VALUES (:set_id, :qid, :ord)"
+            ),
             {"set_id": set_id, "qid": row["id"], "ord": idx},
         )
         options = db.execute(
-            text("SELECT option_key, text_vi, text_en FROM question_options WHERE question_id = :qid ORDER BY option_key"),
+            text(
+                "SELECT option_key, text_vi, text_en FROM question_options "
+                "WHERE question_id = :qid ORDER BY option_key"
+            ),
             {"qid": row["id"]},
         ).mappings().all()
         questions.append(public_question(row, list(options)))
 
     db.execute(
-        text("INSERT INTO usage_ledger(user_id, feature, quantity, metadata) VALUES (:user_id, 'practice_set', 1, CAST(:metadata AS jsonb))"),
+        text(
+            "INSERT INTO usage_ledger(user_id, feature, quantity, metadata) "
+            "VALUES (:user_id, 'practice_set', 1, CAST(:metadata AS jsonb))"
+        ),
         {
             "user_id": user.id,
             "metadata": json.dumps(
@@ -210,6 +377,7 @@ def generate_practice(
         "mode": payload.mode,
         "purpose": payload.purpose,
         "power_session_id": str(payload.power_session_id) if payload.power_session_id else None,
+        "unit_code": resolved_unit_code,
         "questions": questions,
     }
 
@@ -314,7 +482,7 @@ def submit_practice(
 ):
     practice_set = db.execute(
         text("""
-            SELECT id, power_session_id, purpose
+            SELECT id, mode, power_session_id, purpose, generated_items
             FROM practice_sets
             WHERE id = :id AND user_id = :user_id
         """),
@@ -322,6 +490,103 @@ def submit_practice(
     ).mappings().one_or_none()
     if not practice_set:
         raise HTTPException(status_code=404, detail="Practice set not found")
+
+    if practice_set["mode"] == "ai":
+        generated_items = practice_set["generated_items"] or []
+        if isinstance(generated_items, str):
+            generated_items = json.loads(generated_items)
+        item_by_id = {str(item.get("id")): item for item in generated_items}
+
+        attempt_id = db.execute(
+            text(
+                """
+                INSERT INTO practice_attempts(user_id, practice_set_id, started_at)
+                VALUES (:user_id, :set_id, now()) RETURNING id
+                """
+            ),
+            {"user_id": user.id, "set_id": practice_set_id},
+        ).scalar_one()
+
+        results = []
+        correct_total = 0
+        stored_answers = []
+        for answer in payload.answers:
+            item = item_by_id.get(str(answer.question_id))
+            if not item:
+                continue
+            expected = normalize_answer(item["question_type"], item["answer_json"])
+            received = normalize_answer(item["question_type"], answer.answer)
+            is_correct = received == expected
+            correct_total += int(is_correct)
+            stored_answers.append(
+                {
+                    "question_id": str(answer.question_id),
+                    "answer": answer.answer,
+                    "is_correct": is_correct,
+                    "response_time_ms": answer.response_time_ms,
+                }
+            )
+            results.append(
+                {
+                    "question_id": str(answer.question_id),
+                    "is_correct": is_correct,
+                    "explanation_vi": item.get("explanation_vi", ""),
+                    "explanation_en": item.get("explanation_en", ""),
+                    "concept_code": item.get("concept_code"),
+                    "concept_name_vi": item.get("concept_name_vi"),
+                    "concept_name_en": item.get("concept_name_en"),
+                    "mastery": None,
+                }
+            )
+
+        total = len(results)
+        accuracy = correct_total / total if total else 0.0
+        db.execute(
+            text(
+                """
+                UPDATE practice_attempts
+                SET completed_at = now(), accuracy = :accuracy, response_json = CAST(:response AS jsonb)
+                WHERE id = :id
+                """
+            ),
+            {
+                "accuracy": accuracy,
+                "id": attempt_id,
+                "response": json.dumps(
+                    {"answers": stored_answers, "mastery_updated": False}, ensure_ascii=False
+                ),
+            },
+        )
+        db.execute(
+            text(
+                """
+                INSERT INTO learning_events(user_id, learning_session_id, event_type, payload)
+                VALUES (:user_id, NULL, 'practice_completed', CAST(:payload AS jsonb))
+                """
+            ),
+            {
+                "user_id": user.id,
+                "payload": json.dumps(
+                    {
+                        "practice_set_id": str(practice_set_id),
+                        "practice_attempt_id": str(attempt_id),
+                        "accuracy": accuracy,
+                        "purpose": "standalone",
+                        "mode": "ai",
+                        "mastery_updated": False,
+                    }
+                ),
+            },
+        )
+        db.commit()
+        return {
+            "accuracy": accuracy,
+            "correct": correct_total,
+            "total": total,
+            "results": results,
+            "power": None,
+            "mastery_updated": False,
+        }
 
     if practice_set["purpose"] == "evaluate":
         completed_attempt = db.execute(
