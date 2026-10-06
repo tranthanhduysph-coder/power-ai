@@ -32,7 +32,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <aside className="sidebar">
         <Link className="brand" href="/dashboard">
           <span className="brand-mark">P</span>
-          <span>POWER AI</span>
+          <span>POWER-AI-WEB</span>
         </Link>
         <nav>
           {nav.map(([href, vi, en]) => (
