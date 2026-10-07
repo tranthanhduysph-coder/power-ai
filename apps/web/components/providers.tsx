@@ -167,6 +167,7 @@ function ExperienceEnhancements({ children }: { children: React.ReactNode }) {
             {language === "vi" ? "Điều khoản" : "Terms"}
           </button>
           <Link href="/legal">{language === "vi" ? "Bản quyền" : "Copyright"}</Link>
+          <a href="mailto:ttduy@sgu.edu.vn">{language === "vi" ? "Liên hệ" : "Contact"}</a>
         </nav>
       </footer>
 
@@ -196,6 +197,11 @@ function ExperienceEnhancements({ children }: { children: React.ReactNode }) {
               Hệ thống sử dụng trí tuệ nhân tạo để hỗ trợ gợi ý, phản hồi và cá nhân hóa quá trình
               học tập, đồng thời duy trì vai trò chủ động của người học trong từng giai đoạn.
             </p>
+            <div className="about-contact">
+              <strong>{language === "vi" ? "Tác giả & liên hệ" : "Author & contact"}</strong>
+              <span>ThS. Trần Thanh Duy · Saigon University</span>
+              <a href="mailto:ttduy@sgu.edu.vn">ttduy@sgu.edu.vn</a>
+            </div>
             <div className="bio-note">
               <span aria-hidden="true">🧬</span>
               <span>Học có chiến lược. Nghỉ có chủ đích. ATP không phải là vô hạn.</span>
