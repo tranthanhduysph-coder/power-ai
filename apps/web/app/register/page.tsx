@@ -30,7 +30,7 @@ export default function RegisterPage() {
   return (
     <div className="auth-page">
       <div className="auth-card">
-        <div className="auth-brand"><span className="brand-mark">P</span><strong>POWER AI</strong></div>
+        <div className="auth-brand"><span className="brand-mark">P</span><strong>POWER-AI-WEB</strong></div>
         <h1>Create account</h1>
         <form onSubmit={submit} className="form-stack">
           <label>Full name<input value={name} onChange={(e) => setName(e.target.value)} required /></label>
@@ -40,7 +40,7 @@ export default function RegisterPage() {
           {error && <div className="error-box">{error}</div>}
           <button className="button primary full" type="submit">Create account</button>
         </form>
-        <p className="auth-foot">Already registered? <Link href="/login">Sign in</Link></p>
+        <p className="auth-foot">Already registered? <Link href="/login">Sign in</Link></p>\n        <p className="auth-legal">© 2026 Trần Thanh Duy · <Link href="/legal">Copyright & open source</Link></p>
       </div>
     </div>
   );
