@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { AuthProvider } from "./auth-provider";
-import { LanguageProvider } from "./language-provider";
+import { LanguageProvider, useLanguage } from "./language-provider";
 
 type ThemeMode = "light" | "dark";
 
@@ -17,6 +18,7 @@ function formatTime(totalSeconds: number) {
 }
 
 function ExperienceEnhancements({ children }: { children: React.ReactNode }) {
+  const { language } = useLanguage();
   const [theme, setTheme] = useState<ThemeMode | null>(null);
   const [accumulatedSeconds, setAccumulatedSeconds] = useState(0);
   const [startedAt, setStartedAt] = useState<number | null>(null);
@@ -152,17 +154,19 @@ function ExperienceEnhancements({ children }: { children: React.ReactNode }) {
       </aside>
 
       <footer className="site-footer">
-        <div>
-          <strong>© 2026 POWER-AI-WEB</strong>
-          <span>Phát triển bởi ThS. Trần Thanh Duy</span>
+        <div className="site-footer-copy">
+          <span>© 2026 <strong>POWER-AI-WEB</strong></span>
+          <span className="site-footer-author">· Trần Thanh Duy</span>
         </div>
-        <nav aria-label="Thông tin POWER-AI-WEB">
+        <nav aria-label={language === "vi" ? "Thông tin POWER-AI-WEB" : "POWER-AI-WEB information"}>
+          <Link href="/help">{language === "vi" ? "Hướng dẫn" : "Guide"}</Link>
           <button type="button" onClick={() => setAboutOpen(true)}>
-            Giới thiệu
+            {language === "vi" ? "Giới thiệu" : "About"}
           </button>
           <button type="button" onClick={() => setTermsOpen(true)}>
-            Điều khoản &amp; Miễn trừ trách nhiệm
+            {language === "vi" ? "Điều khoản" : "Terms"}
           </button>
+          <Link href="/legal">{language === "vi" ? "Bản quyền" : "Copyright"}</Link>
         </nav>
       </footer>
 
