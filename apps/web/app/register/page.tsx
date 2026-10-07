@@ -40,7 +40,8 @@ export default function RegisterPage() {
           {error && <div className="error-box">{error}</div>}
           <button className="button primary full" type="submit">Create account</button>
         </form>
-        <p className="auth-foot">Already registered? <Link href="/login">Sign in</Link></p>\n        <p className="auth-legal">© 2026 Trần Thanh Duy · <Link href="/legal">Copyright & open source</Link></p>
+        <p className="auth-foot">Already registered? <Link href="/login">Sign in</Link></p>
+        <p className="auth-legal">© 2026 Trần Thanh Duy · <Link href="/legal">Copyright & open source</Link></p>
       </div>
     </div>
   );
