@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { AppShell } from "@/components/app-shell";
-import { AuthGuard } from "@/components/auth-guard";
+import { LanguageToggle } from "@/components/language-toggle";
 import { useLanguage } from "@/components/language-provider";
 
 const vi = {
@@ -44,8 +43,16 @@ export default function LegalPage() {
   const t = language === "vi" ? vi : en;
 
   return (
-    <AuthGuard>
-      <AppShell>
+    <div className="legal-public-shell">
+      <header className="legal-public-header">
+        <Link className="brand" href="/login">
+          <span className="brand-mark">P</span>
+          <span>POWER-AI-WEB</span>
+        </Link>
+        <LanguageToggle />
+      </header>
+
+      <main className="legal-public-main">
         <div className="page-heading">
           <div>
             <p className="eyebrow">POWER · LEGAL</p>
@@ -72,9 +79,18 @@ export default function LegalPage() {
         </section>
 
         <p>
-          <Link className="button secondary inline" href="/help">{t.back}</Link>
+          <Link className="button secondary inline" href="/login">
+            {language === "vi" ? "Về trang đăng nhập" : "Back to sign in"}
+          </Link>
         </p>
-      </AppShell>
-    </AuthGuard>
+      </main>
+
+      <footer className="site-footer">
+        <div>
+          <strong>POWER-AI-WEB</strong>
+          <span>© 2026 Trần Thanh Duy. All rights reserved.</span>
+        </div>
+      </footer>
+    </div>
   );
 }
