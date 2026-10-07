@@ -53,16 +53,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </header>
         <ServiceStatusBanner />
         <div className="page-wrap">{children}</div>
-        <footer className="site-footer">
-          <div>
-            <strong>POWER-AI-WEB</strong>
-            <span>© 2026 Trần Thanh Duy. All rights reserved.</span>
-          </div>
-          <nav aria-label={language === "vi" ? "Thông tin và pháp lý" : "Information and legal"}>
-            <Link href="/help">{language === "vi" ? "Hướng dẫn sử dụng" : "User guide"}</Link>
-            <Link href="/legal">{language === "vi" ? "Bản quyền & mã nguồn mở" : "Copyright & open source"}</Link>
-          </nav>
-        </footer>
       </main>
     </div>
   );
