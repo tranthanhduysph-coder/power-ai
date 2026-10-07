@@ -212,3 +212,14 @@ Health endpoints:
 ## v1.1 content build
 
 The curriculum catalog is separate from textbook ingestion. Use `scripts/content/build_kntt.py` to plan, ingest and verify the KNTT Biology 10–12 scanned PDFs. `content_status` tracks textbook ingestion; `is_power_ready` remains reserved for reviewed POWER learning blueprints.
+
+
+## Copyright and licensing
+
+Copyright © 2026 Trần Thanh Duy. Unless explicitly stated otherwise, original POWER-AI-WEB code, product design, documentation, database design, and project-created educational materials are proprietary and all rights are reserved.
+
+Public visibility of this repository does not mean the entire project is open source. Third-party components remain governed by their own licenses. See `LICENSE.md`, `THIRD_PARTY_NOTICES.md`, and `docs/LEGAL_COMPLIANCE.md`.
+
+Textbooks, publisher figures, Campbell Biology materials, private PDFs, user data, production databases, API keys, and other third-party/private materials are not licensed for public reuse by this repository.
+
+Important: the current PDF ingestion pipeline uses PyMuPDF/MuPDF. Before a proprietary commercial deployment, resolve its AGPL/commercial licensing requirements as described in `THIRD_PARTY_NOTICES.md`.
