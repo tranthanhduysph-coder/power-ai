@@ -870,6 +870,35 @@ html[data-theme="dark"] .legal-note {
   line-height: 1.7;
 }
 
+.about-contact {
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-soft);
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  font-size: 13px;
+}
+
+.about-contact strong {
+  color: var(--text);
+}
+
+.about-contact span {
+  color: var(--muted);
+}
+
+.about-contact a {
+  width: fit-content;
+  color: var(--primary);
+  font-weight: 750;
+}
+
+.about-contact a:hover {
+  text-decoration: underline;
+}
+
 .bio-note {
   margin-top: 18px;
   border: 1px solid var(--line);
