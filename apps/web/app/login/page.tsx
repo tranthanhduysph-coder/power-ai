@@ -42,7 +42,7 @@ export default function LoginPage() {
   return (
     <div className="auth-page">
       <div className="auth-card">
-        <div className="auth-brand"><span className="brand-mark">P</span><strong>POWER AI</strong></div>
+        <div className="auth-brand"><span className="brand-mark">P</span><strong>POWER-AI-WEB</strong></div>
         <h1>Welcome back</h1>
         <p className="muted">Learn Biology with a structured POWER workflow.</p>
         <button className="button secondary full" onClick={googleLogin}>Continue with Google</button>
@@ -53,7 +53,7 @@ export default function LoginPage() {
           {error && <div className="error-box">{error}</div>}
           <button className="button primary full" type="submit">Sign in</button>
         </form>
-        <p className="auth-foot">No account? <Link href="/register">Create one</Link></p>
+        <p className="auth-foot">No account? <Link href="/register">Create one</Link></p>\n        <p className="auth-legal">© 2026 Trần Thanh Duy · <Link href="/legal">Copyright & open source</Link></p>
       </div>
     </div>
   );
