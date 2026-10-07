@@ -754,6 +754,7 @@ html[data-theme="dark"] .error-notice {
   gap: 12px;
 }
 
+.site-footer a,
 .site-footer button {
   border: 0;
   padding: 0;
@@ -762,8 +763,54 @@ html[data-theme="dark"] .error-notice {
   font-weight: 750;
 }
 
+.site-footer a:hover,
 .site-footer button:hover {
   text-decoration: underline;
+}
+
+.legal-intro {
+  padding: 22px 24px;
+  margin-bottom: 18px;
+}
+
+.legal-intro p,
+.legal-card p {
+  margin: 0;
+  line-height: 1.72;
+}
+
+.legal-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.legal-card {
+  padding: 21px 24px;
+}
+
+.legal-card h2 {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+
+.legal-note {
+  margin-top: 18px;
+  padding: 16px 18px;
+  border: 1px solid #d8c995;
+  border-radius: 14px;
+  background: #fff9e8;
+  color: #51451f;
+}
+
+.legal-note p {
+  margin: 6px 0 0;
+  line-height: 1.65;
+}
+
+html[data-theme="dark"] .legal-note {
+  border-color: #655b39;
+  background: #292513;
+  color: #e9dfb8;
 }
 
 .info-modal-backdrop {
