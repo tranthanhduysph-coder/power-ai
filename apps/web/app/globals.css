@@ -917,3 +917,57 @@ html[data-theme="dark"] .legal-note {
     animation: none !important;
   }
 }
+
+
+.auth-legal {
+  margin: 10px 0 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.auth-legal a {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.legal-public-shell {
+  min-height: 100vh;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.legal-public-header {
+  min-height: 68px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 12px 28px;
+}
+
+.legal-public-header .brand {
+  padding: 0;
+  color: var(--text);
+}
+
+.legal-public-main {
+  width: min(1100px, 100%);
+  margin: 0 auto;
+  padding: 36px 32px 70px;
+  flex: 1;
+}
+
+@media (max-width: 640px) {
+  .legal-public-header {
+    padding: 10px 16px;
+  }
+
+  .legal-public-main {
+    padding: 26px 16px 60px;
+  }
+}
