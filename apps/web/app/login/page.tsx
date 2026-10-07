@@ -53,7 +53,8 @@ export default function LoginPage() {
           {error && <div className="error-box">{error}</div>}
           <button className="button primary full" type="submit">Sign in</button>
         </form>
-        <p className="auth-foot">No account? <Link href="/register">Create one</Link></p>\n        <p className="auth-legal">© 2026 Trần Thanh Duy · <Link href="/legal">Copyright & open source</Link></p>
+        <p className="auth-foot">No account? <Link href="/register">Create one</Link></p>
+        <p className="auth-legal">© 2026 Trần Thanh Duy · <Link href="/legal">Copyright & open source</Link></p>
       </div>
     </div>
   );
