@@ -20,14 +20,14 @@ The installed dependency graph is recorded in `apps/web/package-lock.json`. Tran
 | FastAPI | API framework | MIT |
 | Uvicorn | ASGI server | BSD-3-Clause |
 | SQLAlchemy | ORM / SQL toolkit | MIT |
-| Psycopg | PostgreSQL driver | LGPL-3.0-or-later (upstream terms apply) |
+| Psycopg | PostgreSQL driver | LGPL-3.0-only (upstream terms apply) |
 | Pydantic / pydantic-settings | Validation/settings | MIT |
 | Firebase Admin SDK | Authentication/admin integration | Apache-2.0 |
 | python-dotenv | Environment configuration | BSD-3-Clause |
 | pypdf | PDF processing | BSD-3-Clause |
 | OpenAI Python SDK | AI API client | Apache-2.0 |
 | pytest | Testing | MIT |
-| PyMuPDF / MuPDF | PDF rendering and extraction | AGPL-3.0-or-later or a commercial license from Artifex |
+| PyMuPDF / MuPDF | PDF rendering and extraction | GNU AGPL v3 or a commercial license from Artifex |
 
 The backend dependency ranges are recorded in `apps/api/requirements.txt`.
 
