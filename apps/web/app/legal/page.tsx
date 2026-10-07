@@ -85,12 +85,6 @@ export default function LegalPage() {
         </p>
       </main>
 
-      <footer className="site-footer">
-        <div>
-          <strong>POWER-AI-WEB</strong>
-          <span>© 2026 Trần Thanh Duy. All rights reserved.</span>
-        </div>
-      </footer>
     </div>
   );
 }
