@@ -2,7 +2,7 @@
 -- Existing tables learning_events, power_sessions, mastery_snapshots stay unchanged.
 CREATE TABLE IF NOT EXISTS research_consent (
     user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    survey_response_ref TEXT NOT NULL,
+    survey_response_ref TEXT NOT NULL UNIQUE,
     survey_version TEXT NOT NULL,
     consented_at TIMESTAMPTZ NOT NULL,
     activity_scope_start_at TIMESTAMPTZ NOT NULL,
@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS research_consent (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CHECK (length(trim(survey_response_ref)) > 0),
     CHECK (length(trim(survey_version)) > 0),
+    CHECK (NOT research_allowed OR required_authorizations_verified),
     CHECK (activity_scope_start_at <= consented_at)
 );
 CREATE INDEX IF NOT EXISTS idx_research_consent_allowed
