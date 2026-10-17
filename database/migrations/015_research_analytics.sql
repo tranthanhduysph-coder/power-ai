@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS research_consent (
     activity_scope_start_at TIMESTAMPTZ NOT NULL,
     research_allowed BOOLEAN NOT NULL DEFAULT false,
     improvement_allowed BOOLEAN NOT NULL DEFAULT false,
+    required_authorizations_verified BOOLEAN NOT NULL DEFAULT false,
     recorded_by UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CHECK (length(trim(survey_response_ref)) > 0),
@@ -26,6 +27,7 @@ CREATE TABLE IF NOT EXISTS research_consent_audit (
     activity_scope_start_at TIMESTAMPTZ NOT NULL,
     research_allowed BOOLEAN NOT NULL,
     improvement_allowed BOOLEAN NOT NULL,
+    required_authorizations_verified BOOLEAN NOT NULL,
     recorded_by UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
