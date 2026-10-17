@@ -22,7 +22,7 @@ from app.db.session import get_db
 router = APIRouter(prefix="/research", tags=["research"])
 DATASETS = ("events", "cycles", "assessments", "mastery", "linkage")
 FORMULA_PREFIXES = ("=", "+", "-", "@")
-EMAIL_PATTERN = re.compile(r"^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")
+EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
 def require_research_admin(
@@ -267,7 +267,7 @@ def export_research_csv(
         "start_at": start_at, "end_at": end_at, "limit": 0, "offset": 0,
     }).keys() if k != "user_id"]
     out = io.StringIO()
-    writer = csv.writer(out, lineterminator="\\n")
+    writer = csv.writer(out, lineterminator="\n")
     writer.writerow(["participant_id", *fieldnames])
     for row in rows:
         writer.writerow([_participant_id(row["user_id"]), *[_csv_cell(row[k]) for k in fieldnames]])
@@ -283,7 +283,7 @@ def export_research_csv(
     })
     db.commit()
     return Response(
-        content="\\ufeff" + out.getvalue(),
+        content="\ufeff" + out.getvalue(),
         media_type="text/csv; charset=utf-8",
         headers={
             "Content-Disposition": f'attachment; filename="power_research_{dataset}.csv"',
