@@ -55,6 +55,7 @@ export default function ResearchPage() {
   const [researchAllowed, setResearchAllowed] = useState(true);
   const [improvementAllowed, setImprovementAllowed] = useState(false);
   const [historicalConfirmed, setHistoricalConfirmed] = useState(false);
+  const [requiredApprovalsVerified, setRequiredApprovalsVerified] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -128,6 +129,7 @@ export default function ResearchPage() {
           activity_scope_start_at: scopeStartAt ? new Date(scopeStartAt).toISOString() : null,
           research_allowed: researchAllowed,
           improvement_allowed: improvementAllowed,
+          required_authorizations_verified: requiredApprovalsVerified,
           historical_coverage_confirmed: historicalConfirmed,
         }),
       });
@@ -178,6 +180,7 @@ export default function ResearchPage() {
                 <label>Ngày bắt đầu dữ liệu được đồng ý dùng (tùy chọn) <input value={scopeStartAt} onChange={e => setScopeStartAt(e.target.value)} placeholder="Để trống nếu chỉ dùng log từ lúc consent" /></label>
                 <label><input type="checkbox" checked={researchAllowed} onChange={e => setResearchAllowed(e.target.checked)} /> Đồng ý sử dụng dữ liệu cho nghiên cứu</label>
                 <label><input type="checkbox" checked={improvementAllowed} onChange={e => setImprovementAllowed(e.target.checked)} /> Đồng ý sử dụng dữ liệu cho cải tiến sản phẩm</label>
+                <label><input type="checkbox" checked={requiredApprovalsVerified} onChange={e => setRequiredApprovalsVerified(e.target.checked)} /> Đã kiểm chứng chấp thuận/đồng thuận của học sinh và phụ huynh khi áp dụng, theo hồ sơ nghiên cứu</label>
                 <label><input type="checkbox" checked={historicalConfirmed} onChange={e => setHistoricalConfirmed(e.target.checked)} /> Có bằng chứng đồng ý sử dụng lịch sử trước ngày consent (nếu khai báo)</label>
                 <button className="button primary inline" disabled={busy} onClick={registerConsent}>Lưu bản ghi có kiểm chứng</button>
               </div>
