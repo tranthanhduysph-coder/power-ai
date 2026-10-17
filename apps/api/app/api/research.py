@@ -133,6 +133,12 @@ def record_verified_form_consent(
     if len(matching_users) != 1:
         raise HTTPException(409, "Ambiguous POWER email; resolve before linking")
     user_id = matching_users[0]
+    reused = db.execute(text("""
+        SELECT 1 FROM research_consent
+        WHERE survey_response_ref = :ref AND user_id <> :uid
+    """), {"ref": payload.survey_response_ref, "uid": user_id}).scalar_one_or_none()
+    if reused:
+        raise HTTPException(409, "Survey response reference is already linked to another learner")
     previous = db.execute(text("""
         SELECT consented_at FROM research_consent WHERE user_id = :uid
     """), {"uid": user_id}).scalar_one_or_none()
