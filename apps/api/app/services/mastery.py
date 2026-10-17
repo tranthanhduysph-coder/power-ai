@@ -62,4 +62,13 @@ def update_mastery(
             "correct_count": 1 if correct else 0,
         },
     )
+    # Record the observed update; historical states must never be reconstructed.
+    # This is a product mastery score, not an IRT ability estimate.
+    db.execute(
+        text("""
+            INSERT INTO mastery_snapshots(user_id, concept_id, mastery_score, captured_at)
+            VALUES (:user_id, :concept_id, :mastery, now())
+        """),
+        {"user_id": user_id, "concept_id": concept_id, "mastery": float(new)},
+    )
     return float(new)
