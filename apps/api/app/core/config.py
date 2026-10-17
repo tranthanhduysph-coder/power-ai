@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     ingest_chunk_max_chars: int = 2400
     ingest_chunk_overlap_chars: int = 250
 
+    # Disabled unless the verified Firebase UID and an HMAC key are configured.
+    research_admin_firebase_uid: str = ""
+    research_admin_email: str = "ttduy@sgu.edu.vn"
+    research_pseudonym_key: str = ""
+
     dev_user_email: str = "student@power.local"
     dev_user_name: str = "POWER Student"
 
