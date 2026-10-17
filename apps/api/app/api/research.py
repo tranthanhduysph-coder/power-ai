@@ -5,6 +5,7 @@ import csv
 import hashlib
 import hmac
 import io
+import json
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Literal
@@ -173,7 +174,16 @@ DATASET_QUERIES = {
     "events": """
         SELECT le.user_id, le.id AS event_id, le.learning_session_id,
                ps.id AS power_session_id, cu.code AS unit_code,
-               le.event_type, le.concept_id, le.created_at AS recorded_at
+               le.event_type, le.concept_id, le.created_at AS recorded_at,
+               le.payload ->> 'smart_score' AS smart_score,
+               le.payload ->> 'readiness' AS readiness,
+               le.payload ->> 'coverage' AS organization_coverage,
+               le.payload ->> 'completion_ratio' AS work_completion_ratio,
+               le.payload ->> 'completed_tasks' AS completed_tasks_count,
+               le.payload ->> 'evidence_chars' AS evidence_length,
+               le.payload ->> 'accuracy' AS evaluate_accuracy,
+               le.payload ->> 'correct' AS evaluate_correct,
+               le.payload ->> 'total' AS evaluate_total
         FROM learning_events le
         JOIN research_consent rc ON rc.user_id = le.user_id AND rc.research_allowed
              AND le.created_at >= rc.activity_scope_start_at
@@ -255,6 +265,9 @@ def export_research_csv(
     admin: CurrentUser = Depends(require_research_admin),
     db: Session = Depends(get_db),
 ):
+    # Refuse any export, even an empty one, until stable pseudonymization is configured.
+    if len(get_settings().research_pseudonym_key) < 32:
+        raise HTTPException(503, "Research pseudonym key is not configured")
     if start_at.tzinfo is None or end_at.tzinfo is None:
         raise HTTPException(422, "Export timestamps must include timezone offsets")
     if start_at >= end_at or end_at - start_at > timedelta(days=366):
@@ -276,7 +289,7 @@ def export_research_csv(
         VALUES (:actor, :dataset, :rows, CAST(:filters AS jsonb))
     """), {
         "actor": admin.id, "dataset": dataset, "rows": len(rows),
-        "filters": __import__("json").dumps({
+        "filters": json.dumps({
             "start_at": start_at.isoformat(), "end_at": end_at.isoformat(),
             "limit": limit, "offset": offset,
         }),
