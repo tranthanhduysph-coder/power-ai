@@ -54,6 +54,7 @@ class ConsentRecord(BaseModel):
     consented_at: datetime
     research_allowed: bool
     improvement_allowed: bool = False
+    required_authorizations_verified: bool = False
     activity_scope_start_at: datetime | None = None
     historical_coverage_confirmed: bool = False
 
@@ -70,6 +71,8 @@ class ConsentRecord(BaseModel):
             raise ValueError("consented_at must include a timezone offset")
         if self.consented_at > datetime.now(timezone.utc) + timedelta(minutes=5):
             raise ValueError("Consent date cannot be in the future")
+        if self.research_allowed and not self.required_authorizations_verified:
+            raise ValueError("Required participant/guardian approvals have not been verified")
         if self.activity_scope_start_at:
             if self.activity_scope_start_at.tzinfo is None:
                 raise ValueError("activity_scope_start_at must include a timezone offset")
@@ -141,13 +144,15 @@ def record_verified_form_consent(
         "uid": user_id, "ref": payload.survey_response_ref, "version": payload.survey_version,
         "consented_at": payload.consented_at, "scope": scope_start,
         "research": payload.research_allowed, "improvement": payload.improvement_allowed,
+        "approvals": payload.required_authorizations_verified,
         "actor": admin.id,
     }
     db.execute(text("""
         INSERT INTO research_consent (
             user_id, survey_response_ref, survey_version, consented_at,
-            activity_scope_start_at, research_allowed, improvement_allowed, recorded_by
-        ) VALUES (:uid, :ref, :version, :consented_at, :scope, :research, :improvement, :actor)
+            activity_scope_start_at, research_allowed, improvement_allowed,
+            required_authorizations_verified, recorded_by
+        ) VALUES (:uid, :ref, :version, :consented_at, :scope, :research, :improvement, :approvals, :actor)
         ON CONFLICT (user_id) DO UPDATE SET
             survey_response_ref = EXCLUDED.survey_response_ref,
             survey_version = EXCLUDED.survey_version,
@@ -155,14 +160,16 @@ def record_verified_form_consent(
             activity_scope_start_at = EXCLUDED.activity_scope_start_at,
             research_allowed = EXCLUDED.research_allowed,
             improvement_allowed = EXCLUDED.improvement_allowed,
+            required_authorizations_verified = EXCLUDED.required_authorizations_verified,
             recorded_by = EXCLUDED.recorded_by,
             updated_at = now()
     """), params)
     db.execute(text("""
         INSERT INTO research_consent_audit (
             user_id, survey_response_ref, survey_version, consented_at,
-            activity_scope_start_at, research_allowed, improvement_allowed, recorded_by
-        ) VALUES (:uid, :ref, :version, :consented_at, :scope, :research, :improvement, :actor)
+            activity_scope_start_at, research_allowed, improvement_allowed,
+            required_authorizations_verified, recorded_by
+        ) VALUES (:uid, :ref, :version, :consented_at, :scope, :research, :improvement, :approvals, :actor)
     """), params)
     db.commit()
     return {"participant_id": _participant_id(user_id),
