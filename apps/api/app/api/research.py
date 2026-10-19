@@ -24,6 +24,12 @@ router = APIRouter(prefix="/research", tags=["research"])
 DATASETS = ("events", "cycles", "assessments", "mastery", "linkage")
 FORMULA_PREFIXES = ("=", "+", "-", "@")
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+NUMERIC_PATTERN = re.compile(r"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?")
+JSON_METRIC_FIELDS = frozenset({
+    "smart_score", "readiness", "organization_coverage", "work_completion_ratio",
+    "completed_tasks_count", "evidence_length", "evaluate_accuracy",
+    "evaluate_correct", "evaluate_total",
+})
 
 
 def require_research_admin(
@@ -102,6 +108,16 @@ def _csv_cell(value: object) -> str:
     return value
 
 
+def _export_cell(field: str, value: object) -> str:
+    # JSON keys are not a type boundary: legacy/malformed payloads can contain
+    # learner text even under a metric name. Export numeric metric values only.
+    if field in JSON_METRIC_FIELDS and value is not None:
+        metric = str(value)
+        if len(metric) > 64 or not NUMERIC_PATTERN.fullmatch(metric):
+            return ""
+    return _csv_cell(value)
+
+
 @router.get("/status")
 def research_status(
     admin: CurrentUser = Depends(require_research_admin),
@@ -133,17 +149,28 @@ def record_verified_form_consent(
     if len(matching_users) != 1:
         raise HTTPException(409, "Ambiguous POWER email; resolve before linking")
     user_id = matching_users[0]
+    # Validate configuration before any consent/audit write can be committed.
+    participant_id = _participant_id(user_id)
+    # Serialize imports of the same source and the same learner. Otherwise a
+    # stale concurrent request could re-enable consent after a withdrawal.
+    db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:ref, 0))"),
+               {"ref": "research-consent:" + payload.survey_response_ref})
+    db.execute(text("SELECT id FROM users WHERE id = :uid FOR UPDATE"), {"uid": user_id})
     reused = db.execute(text("""
         SELECT 1 FROM research_consent
         WHERE survey_response_ref = :ref AND user_id <> :uid
+        UNION ALL
+        SELECT 1 FROM research_consent_audit
+        WHERE survey_response_ref = :ref AND user_id <> :uid
+        LIMIT 1
     """), {"ref": payload.survey_response_ref, "uid": user_id}).scalar_one_or_none()
     if reused:
         raise HTTPException(409, "Survey response reference is already linked to another learner")
     previous = db.execute(text("""
         SELECT consented_at FROM research_consent WHERE user_id = :uid
     """), {"uid": user_id}).scalar_one_or_none()
-    if previous and payload.consented_at < previous:
-        raise HTTPException(409, "Older consent cannot overwrite a newer decision")
+    if previous and payload.consented_at <= previous:
+        raise HTTPException(409, "Consent must be newer than the recorded decision")
 
     scope_start = payload.activity_scope_start_at or payload.consented_at
     params = {
@@ -178,7 +205,7 @@ def record_verified_form_consent(
         ) VALUES (:uid, :ref, :version, :consented_at, :scope, :research, :improvement, :approvals, :actor)
     """), params)
     db.commit()
-    return {"participant_id": _participant_id(user_id),
+    return {"participant_id": participant_id,
             "research_allowed": payload.research_allowed,
             "activity_scope_start_at": scope_start.isoformat()}
 
@@ -296,7 +323,7 @@ def export_research_csv(
     writer = csv.writer(out, lineterminator="\n")
     writer.writerow(["participant_id", *fieldnames])
     for row in rows:
-        writer.writerow([_participant_id(row["user_id"]), *[_csv_cell(row[k]) for k in fieldnames]])
+        writer.writerow([_participant_id(row["user_id"]), *[_export_cell(k, row[k]) for k in fieldnames]])
     db.execute(text("""
         INSERT INTO research_export_audit(actor_user_id, dataset, rows_exported, filters)
         VALUES (:actor, :dataset, :rows, CAST(:filters AS jsonb))

@@ -5,10 +5,16 @@ Run with DATABASE_URL pointing to an EMPTY disposable database. NEVER production
 from pathlib import Path
 import os
 import psycopg
+from psycopg.conninfo import conninfo_to_dict
 
 dsn = os.environ.get("RESEARCH_TEST_DATABASE_URL")
-if not dsn or "localhost" not in dsn and "127.0.0.1" not in dsn:
-    raise SystemExit("Refusing migration test unless RESEARCH_TEST_DATABASE_URL points to localhost")
+params = conninfo_to_dict(dsn) if dsn else {}
+host = params.get("host", "")
+if (not (host in ("localhost", "127.0.0.1", "::1") or host.startswith("/"))
+        or params.get("hostaddr")
+        or params.get("service")
+        or params.get("dbname") != "research_migration_test"):
+    raise SystemExit("Refusing migration test outside local disposable research_migration_test")
 
 migration = Path(__file__).resolve().parents[3] / "database/migrations/015_research_analytics.sql"
 with psycopg.connect(dsn, autocommit=True) as conn:

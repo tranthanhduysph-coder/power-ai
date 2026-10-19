@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS research_consent_audit (
 );
 CREATE INDEX IF NOT EXISTS idx_research_consent_audit_user
     ON research_consent_audit (user_id, recorded_at DESC);
+CREATE INDEX IF NOT EXISTS idx_research_consent_audit_source
+    ON research_consent_audit (survey_response_ref, user_id);
 
 CREATE TABLE IF NOT EXISTS research_export_audit (
     id BIGSERIAL PRIMARY KEY,

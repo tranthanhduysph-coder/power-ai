@@ -57,6 +57,11 @@ is a product indicator, not an IRT ability estimate.
    To process a withdrawal, enter a new documented decision with a later time
    and `research_allowed=false`. Future exports then exclude this learner.
    Existing downloaded exports must be handled under the withdrawal protocol.
+   Every replacement must have a strictly later decision time; equal-time
+   imports are rejected with 409 to prevent replay from reversing a withdrawal.
+   A response reference remains reserved to its original learner in audit
+   history even after a later response replaces it. Concurrent imports are
+   serialized by source reference and learner.
 5. Export `linkage` to a separately secured file to map the Form's email to a
    stable `participant_id`. Do not add names/emails to other analytic files.
 6. Export `events`, `cycles`, `assessments`, `mastery` for the same time
@@ -138,6 +143,27 @@ npm run build
 For database tests, use a temporary clone **not** production. Confirm the
 migration applies once and is skipped on the second run. Check the export
 audit row count and test a consenting and a withdrawing test learner.
+
+The PostgreSQL CI job now runs the full schema with pgvector and
+`tests/test_research_integration.py` using synthetic accounts only. For a local
+run, explicitly set `RESEARCH_TEST_DATABASE_URL` to a local disposable database
+named `research_integration_test` (empty schema after migrations), or
+`research_restore` (private restored checkpoint after migrations), then run:
+
+```bash
+python -m pytest -q tests/test_research_admin.py tests/test_research_integration.py
+```
+
+Integration fixtures use rollback or delete only their generated synthetic
+accounts; no existing learner is granted consent. The standalone migration
+smoke script requires a separate empty local database named
+`research_migration_test`, using a psycopg DSN in the same environment variable.
+Do not set the test variable to a production database or commit a checkpoint.
+JSON metric fields are type-filtered before CSV output; malformed text values
+are exported as empty cells rather than exposing learner content.
+
+See [isolated checkpoint validation](RESEARCH_RESTORE_VALIDATION_2026-10-19.md)
+for the restore evidence and remaining deployment hold points.
 
 ## Post-review work (not included here)
 
