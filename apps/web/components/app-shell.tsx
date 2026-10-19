@@ -20,7 +20,9 @@ const nav = [
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { devMode } = useAuth();
+  const { devMode, user } = useAuth();
+  const showResearchLink = !devMode && Boolean(user?.emailVerified) &&
+    user?.email?.trim().toLowerCase() === "ttduy@sgu.edu.vn";
   const { language } = useLanguage();
 
   const logout = async () => {
@@ -36,7 +38,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <span>POWER-AI-WEB</span>
         </Link>
         <nav>
-          {nav.map(([href, vi, en]) => (
+          {[...nav, ...(showResearchLink ? [["/research", "Dữ liệu nghiên cứu", "Research data"]] : [])].map(([href, vi, en]) => (
             <Link key={href} href={href} className={(href === "/learn" ? pathname.startsWith("/learn") : pathname === href) ? "nav-link active" : "nav-link"}>
               {language === "vi" ? vi : en}
             </Link>
