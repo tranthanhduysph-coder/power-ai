@@ -22,6 +22,7 @@ from app.api import health, research
 from app.core.auth import CurrentUser, get_current_user
 from app.db.session import get_db
 from app.services.mastery import update_mastery
+from app.db.research_staging import assert_synthetic_database, seed_synthetic_activity
 
 
 T0 = datetime(2026, 10, 10, tzinfo=timezone.utc)
@@ -214,6 +215,29 @@ def test_readiness_detects_missing_research_migration_and_table(case):
     assert unavailable.value.status_code == 503
     assert "015_research_analytics" in unavailable.value.detail["missing_migrations"]
     assert "research_export_audit" in unavailable.value.detail["missing_tables"]
+
+
+def test_staging_fixtures_are_idempotent_and_never_grant_consent(local_engine):
+    with local_engine.connect() as conn:
+        transaction = conn.begin()
+        try:
+            if conn.scalar(text("SELECT count(*) FROM users")):
+                pytest.skip("Fixture initialization is tested only on a fresh synthetic database")
+            assert_synthetic_database(conn, "")
+            seed_synthetic_activity(conn)
+            seed_synthetic_activity(conn)
+            assert_synthetic_database(conn, "")
+            assert conn.scalar(text("SELECT count(*) FROM users WHERE firebase_uid LIKE 'staging-fixture-%'")) == 3
+            assert conn.scalar(text("SELECT count(*) FROM learning_events WHERE event_type='staging_fixture'")) == 3
+            assert conn.scalar(text("SELECT count(*) FROM research_consent")) == 0
+            assert conn.scalar(text("SELECT count(*) FROM research_consent_audit")) == 0
+        finally:
+            transaction.rollback()
+
+
+def test_staging_rejects_database_with_other_learner_accounts(case):
+    with pytest.raises(ValueError, match="non-fixture learner accounts"):
+        assert_synthetic_database(case.db, case.admin.firebase_uid)
 
 
 def test_historical_scope_and_linkage_formula_utf8(case):
