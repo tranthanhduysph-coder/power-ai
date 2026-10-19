@@ -18,7 +18,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
-from app.api import research
+from app.api import health, research
 from app.core.auth import CurrentUser, get_current_user
 from app.db.session import get_db
 from app.services.mastery import update_mastery
@@ -62,7 +62,7 @@ def case(monkeypatch, local_engine):
         settings = SimpleNamespace(auth_mode="firebase", research_admin_firebase_uid=admin.firebase_uid,
                                    research_admin_email=admin.email, research_pseudonym_key="a" * 40)
         monkeypatch.setattr(research, "get_settings", lambda: settings)
-        monkeypatch.setattr(research, "_claims_from_bearer", lambda _: {
+        monkeypatch.setattr(research, "_claims_from_bearer", lambda _, **kwargs: {
             "uid": admin.firebase_uid, "email": admin.email, "email_verified": True})
         app = FastAPI()
         app.include_router(research.router)
@@ -204,6 +204,16 @@ def test_mastery_snapshot_uses_same_transaction(case):
         savepoint.rollback()
     assert case.db.scalar(text("SELECT count(*) FROM mastery_snapshots WHERE user_id=:uid"), {"uid": uid}) == 0
     assert case.db.scalar(text("SELECT count(*) FROM concept_mastery WHERE user_id=:uid"), {"uid": uid}) == 0
+
+
+def test_readiness_detects_missing_research_migration_and_table(case):
+    case.db.execute(text("DELETE FROM schema_migrations WHERE version='015_research_analytics'"))
+    case.db.execute(text("DROP TABLE research_export_audit"))
+    with pytest.raises(research.HTTPException) as unavailable:
+        health.readiness(case.db)
+    assert unavailable.value.status_code == 503
+    assert "015_research_analytics" in unavailable.value.detail["missing_migrations"]
+    assert "research_export_audit" in unavailable.value.detail["missing_tables"]
 
 
 def test_historical_scope_and_linkage_formula_utf8(case):

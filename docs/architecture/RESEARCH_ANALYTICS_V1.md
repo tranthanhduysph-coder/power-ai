@@ -29,7 +29,13 @@ is a product indicator, not an IRT ability estimate.
      it stable across exports; rotating it changes all participant codes.
      Store in Render secret environment variables, never in GitHub.
    - `AUTH_MODE=firebase`. Research routes explicitly reject dev auth.
+   - Ensure `FIREBASE_AUTH_EMULATOR_HOST` is unset. Research administration
+     rejects emulator configuration even when `AUTH_MODE=firebase`.
 5. Configure production Firebase credentials and allowed CORS origin.
+   Research requests check revoked/disabled administrator tokens through the
+   Firebase Admin SDK. Credentials must permit reading Firebase Auth user
+   status; a missing permission or failed verification denies the request.
+   See [Firebase session verification](https://firebase.google.com/docs/auth/admin/manage-sessions).
 6. Verify `GET /api/v1/research/status` returns 403 for any ordinary student
    and for dev mode, and succeeds only for the exact verified Firebase UID.
 7. Create a verified Google Form response with **separately recorded** research

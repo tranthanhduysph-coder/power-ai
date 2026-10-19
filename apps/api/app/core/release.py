@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-LATEST_MIGRATION = "012_power_blueprint_drafts"
+LATEST_MIGRATION = "015_research_analytics"
 REQUIRED_MIGRATIONS = (
     "001_initial",
     "002_knowledge_ingestion",
@@ -16,6 +16,9 @@ REQUIRED_MIGRATIONS = (
     "010_content_status_mapping_reconciliation",
     "011_content_status_strict_page_evidence",
     "012_power_blueprint_drafts",
+    "013_power_content_qa",
+    "014_ai_practice_runtime",
+    "015_research_analytics",
 )
 REQUIRED_TABLES = (
     "users",
@@ -31,6 +34,9 @@ REQUIRED_TABLES = (
     "content_chunks",
     "power_unit_blueprints",
     "power_blueprint_drafts",
+    "research_consent",
+    "research_consent_audit",
+    "research_export_audit",
 )
 LOCAL_RELEASE_VERSION = "1.2.0-content-local"
 

@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from app.api import research
+from app.core import auth
 from app.core.auth import CurrentUser
 
 
@@ -31,7 +32,7 @@ def test_admin_requires_verified_uid_email_and_production(monkeypatch):
     monkeypatch.setattr(research, "get_settings", lambda: settings())
     monkeypatch.setattr(
         research, "_claims_from_bearer",
-        lambda _: {"uid": "firebase-staff-uid", "email": "ttduy@sgu.edu.vn",
+        lambda _, **kwargs: {"uid": "firebase-staff-uid", "email": "ttduy@sgu.edu.vn",
                    "email_verified": True},
     )
     assert research.require_research_admin(actor(), "Bearer example").firebase_uid == "firebase-staff-uid"
@@ -49,7 +50,7 @@ def test_admin_requires_verified_uid_email_and_production(monkeypatch):
 ])
 def test_admin_rejects_mismatched_claims(monkeypatch, claims):
     monkeypatch.setattr(research, "get_settings", lambda: settings())
-    monkeypatch.setattr(research, "_claims_from_bearer", lambda _: claims)
+    monkeypatch.setattr(research, "_claims_from_bearer", lambda _, **kwargs: claims)
     with pytest.raises(HTTPException) as denied:
         research.require_research_admin(actor(), "Bearer example")
     assert denied.value.status_code == 403
@@ -90,3 +91,54 @@ def test_csv_dangerous_prefix_and_pseudonym(monkeypatch):
     uid = uuid4()
     assert research._participant_id(uid) == research._participant_id(uid)
     assert str(uid) not in research._participant_id(uid)
+
+
+@pytest.mark.parametrize("source", ["settings", "environment"])
+def test_admin_rejects_authentication_emulator_before_token_check(monkeypatch, source):
+    config = settings()
+    monkeypatch.delenv("FIREBASE_AUTH_EMULATOR_HOST", raising=False)
+    if source == "settings":
+        config.firebase_auth_emulator_host = "127.0.0.1:9099"
+    else:
+        monkeypatch.setenv("FIREBASE_AUTH_EMULATOR_HOST", "127.0.0.1:9099")
+    monkeypatch.setattr(research, "get_settings", lambda: config)
+
+    def should_not_verify(*args, **kwargs):
+        pytest.fail("Research must reject emulator mode before trusting its claims")
+
+    monkeypatch.setattr(research, "_claims_from_bearer", should_not_verify)
+    with pytest.raises(HTTPException) as denied:
+        research.require_research_admin(actor(), "Bearer emulator-token")
+    assert denied.value.status_code == 403
+
+
+def test_research_admin_checks_token_revocation(monkeypatch):
+    monkeypatch.setattr(research, "get_settings", lambda: settings())
+    monkeypatch.delenv("FIREBASE_AUTH_EMULATOR_HOST", raising=False)
+    monkeypatch.setattr(auth, "_init_firebase", lambda: None)
+    checks = []
+
+    def verify(token, *, check_revoked):
+        assert token == "revoked-token"
+        checks.append(check_revoked)
+        raise auth.firebase_auth.RevokedIdTokenError("test-only revoked token")
+
+    monkeypatch.setattr(auth.firebase_auth, "verify_id_token", verify)
+    with pytest.raises(HTTPException) as denied:
+        research.require_research_admin(actor(), "Bearer revoked-token")
+    assert denied.value.status_code == 401
+    assert denied.value.detail == "Invalid Firebase token"
+    assert checks == [True]
+
+
+def test_auth_default_keeps_existing_student_verification(monkeypatch):
+    monkeypatch.setattr(auth, "_init_firebase", lambda: None)
+    calls = []
+
+    def verify(token, *, check_revoked):
+        calls.append(check_revoked)
+        return {"uid": "student-test"}
+
+    monkeypatch.setattr(auth.firebase_auth, "verify_id_token", verify)
+    assert auth._claims_from_bearer("Bearer example")["uid"] == "student-test"
+    assert calls == [False]

@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import io
 import json
+import os
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Literal
@@ -38,9 +39,12 @@ def require_research_admin(
 ) -> CurrentUser:
     """Require verified Firebase token AND a pinned UID and verified email."""
     settings = get_settings()
-    if settings.auth_mode.lower() != "firebase" or not settings.research_admin_firebase_uid:
+    if (settings.auth_mode.lower() != "firebase"
+            or not settings.research_admin_firebase_uid
+            or getattr(settings, "firebase_auth_emulator_host", None)
+            or os.environ.get("FIREBASE_AUTH_EMULATOR_HOST")):
         raise HTTPException(403, "Research administration is disabled")
-    claims = _claims_from_bearer(authorization)
+    claims = _claims_from_bearer(authorization, check_revoked=True)
     claimed_uid = str(claims.get("uid") or claims.get("sub") or "")
     claimed_email = str(claims.get("email") or "").strip().casefold()
     if (

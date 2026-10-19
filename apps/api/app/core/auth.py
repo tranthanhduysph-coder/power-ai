@@ -39,13 +39,13 @@ def _init_firebase() -> None:
         firebase_admin.initialize_app(credentials.ApplicationDefault(), {"projectId": settings.firebase_project_id})
 
 
-def _claims_from_bearer(authorization: str | None) -> dict:
+def _claims_from_bearer(authorization: str | None, *, check_revoked: bool = False) -> dict:
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Firebase bearer token")
     token = authorization.split(" ", 1)[1].strip()
     _init_firebase()
     try:
-        return firebase_auth.verify_id_token(token, check_revoked=False)
+        return firebase_auth.verify_id_token(token, check_revoked=check_revoked)
     except Exception as exc:  # Firebase exceptions vary by credential/emulator mode.
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Firebase token") from exc
 

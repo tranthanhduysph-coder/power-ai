@@ -1,5 +1,6 @@
 from app.core.release import (
     REQUIRED_MIGRATIONS,
+    REQUIRED_TABLES,
     ReadinessReport,
     migration_gaps,
     readiness_ok,
@@ -9,6 +10,12 @@ from app.core.release import (
 def test_migration_gaps_reports_only_missing_versions():
     applied = list(REQUIRED_MIGRATIONS[:-1])
     assert migration_gaps(applied) == (REQUIRED_MIGRATIONS[-1],)
+
+
+def test_readiness_requires_research_schema_before_release():
+    before_research = tuple(v for v in REQUIRED_MIGRATIONS if v != "015_research_analytics")
+    assert migration_gaps(before_research) == ("015_research_analytics",)
+    assert {"research_consent", "research_consent_audit", "research_export_audit"} <= set(REQUIRED_TABLES)
 
 
 def test_readiness_requires_database_vector_schema_and_ready_unit():
