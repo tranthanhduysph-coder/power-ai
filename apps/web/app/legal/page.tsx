@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { LanguageToggle } from "@/components/language-toggle";
+import { ResearchDataNotice } from "@/components/research-data-notice";
 import { useLanguage } from "@/components/language-provider";
 
 const vi = {
-  title: "Bản quyền & mã nguồn mở",
+  title: "Điều khoản, dữ liệu & bản quyền",
   intro: "Trang này phân biệt rõ phần thuộc bản quyền POWER-AI-WEB với các thư viện mã nguồn mở và học liệu của bên thứ ba.",
   sections: [
     ["Bản quyền POWER-AI-WEB", "© 2026 Trần Thanh Duy. All rights reserved. Trừ khi được ghi rõ khác đi, mã nguồn gốc, giao diện, triển khai quy trình POWER, cấu trúc dữ liệu, tài liệu và học liệu do POWER-AI-WEB tự xây dựng được bảo hộ bản quyền. Việc repository được công khai trên GitHub không tự động đồng nghĩa với việc toàn bộ dự án được cấp giấy phép mã nguồn mở."],
@@ -22,7 +23,7 @@ const vi = {
 };
 
 const en = {
-  title: "Copyright & open-source notices",
+  title: "Terms, data & copyright notices",
   intro: "This page distinguishes POWER-AI-WEB proprietary materials from open-source dependencies and third-party educational content.",
   sections: [
     ["POWER-AI-WEB copyright", "© 2026 Trần Thanh Duy. All rights reserved. Unless expressly stated otherwise, original source code, interface design, POWER workflow implementation, data structures, documentation, and original educational materials created for POWER-AI-WEB are protected proprietary materials. A publicly visible GitHub repository does not by itself make the entire project open source."],
@@ -65,6 +66,7 @@ export default function LegalPage() {
         </section>
 
         <div className="legal-grid">
+          <ResearchDataNotice language={language} />
           {t.sections.map(([title, body]) => (
             <section className="card legal-card" key={title}>
               <h2>{title}</h2>

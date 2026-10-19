@@ -78,7 +78,7 @@ jobs:
         run: |
           python -m app.db.migrate
           python -m app.db.migrate
-      - name: Test consent, withdrawal, exports and concurrent imports
+      - name: Test bulk exports, privacy, legacy records and concurrent imports
         env:
           PYTHONPATH: apps/api
           RESEARCH_TEST_DATABASE_URL: postgresql+psycopg://test:test@127.0.0.1:5432/research_integration_test

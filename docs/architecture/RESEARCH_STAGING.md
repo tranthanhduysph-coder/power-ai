@@ -80,17 +80,12 @@ health check alone does not verify a real Firebase administrator session.
 ## Browser acceptance checks
 
 - Sign in as the designated verified administrator and open `/research`.
-- Confirm the registry begins with zero research consents.
-- Register the allow fixture with synthetic evidence, survey version
-  `STAGING-SYNTHETIC`, decision time `2026-10-18T00:00:00Z`, research true and
-  approval verification true. These flags describe a fictional test only.
-- Register the deny fixture with research false and product improvement true;
-  leave the absent fixture unregistered.
-- Export all five datasets for 18–21 October 2026. Each should contain only
-  the allow fixture; linkage alone includes its fictional email. Check audits,
-  UTF-8, paging and stable participant IDs.
-- Record a later withdrawal for the allow fixture. All five datasets must then
-  exclude it. Replay an older or equal-time grant and expect 409.
+- Confirm the page contains bulk export controls without a consent entry form.
+- Export all five datasets for 18–21 October 2026. All three synthetic fixtures
+  should be included regardless of their names or legacy Form records. Linkage
+  alone includes fictional emails. Check audits, UTF-8, paging and stable IDs.
+- Verify a window with no recorded activity returns a header-only CSV, including
+  linkage. The legacy consent registry must remain unchanged by exports.
 - Verify ordinary student denial, an unverified administrator email, and a
   revoked/disabled test session. Do not disable the real production admin or
   revoke their production sessions merely to perform this test.

@@ -1,4 +1,4 @@
-"""Consent-gated, audited research exports. No unrestricted learner-data endpoint."""
+"""Admin-only, audited exports of allowlisted learning behavior fields."""
 from __future__ import annotations
 
 import csv
@@ -132,19 +132,21 @@ def research_status(
           (SELECT count(*) FROM users) AS users_total,
           (SELECT count(*) FROM learning_events) AS event_count,
           (SELECT count(*) FROM power_sessions) AS cycle_count,
+          (SELECT count(*) FROM practice_attempts) AS assessment_count,
           (SELECT count(*) FROM mastery_snapshots) AS mastery_snapshot_count,
           (SELECT count(*) FROM research_consent WHERE research_allowed) AS consented_students
     """)).mappings().one()
-    return {"access": "research_admin", "datasets": list(DATASETS), "counts": dict(counts)}
+    return {"access": "research_admin", "export_scope": "all_recorded_activity",
+            "datasets": list(DATASETS), "counts": dict(counts)}
 
 
-@router.post("/consents")
+@router.post("/consents", deprecated=True)
 def record_verified_form_consent(
     payload: ConsentRecord,
     admin: CurrentUser = Depends(require_research_admin),
     db: Session = Depends(get_db),
 ):
-    """Manual import from a verified Google Form response; never infer consent from login."""
+    """Legacy evidence registry, retained for compatibility; does not filter exports."""
     matching_users = db.execute(text("""
         SELECT id FROM users WHERE lower(btrim(email)) = :email LIMIT 2
     """), {"email": payload.email}).scalars().all()
@@ -229,8 +231,6 @@ DATASET_QUERIES = {
                le.payload ->> 'correct' AS evaluate_correct,
                le.payload ->> 'total' AS evaluate_total
         FROM learning_events le
-        JOIN research_consent rc ON rc.user_id = le.user_id AND rc.research_allowed
-             AND le.created_at >= rc.activity_scope_start_at
         LEFT JOIN learning_sessions ls ON ls.id = le.learning_session_id
         LEFT JOIN power_sessions ps ON ps.learning_session_id = ls.id
         LEFT JOIN curriculum_units cu ON cu.id = ls.curriculum_unit_id
@@ -250,8 +250,6 @@ DATASET_QUERIES = {
                eval.state_json ->> 'accuracy' AS evaluate_accuracy
         FROM power_sessions ps
         JOIN learning_sessions ls ON ls.id = ps.learning_session_id
-        JOIN research_consent rc ON rc.user_id = ps.user_id AND rc.research_allowed
-             AND ls.started_at >= rc.activity_scope_start_at
         LEFT JOIN curriculum_units cu ON cu.id = ls.curriculum_unit_id
         LEFT JOIN power_phase_state prep ON prep.power_session_id = ps.id AND prep.phase = 'PREPARE'
         LEFT JOIN power_phase_state org ON org.power_session_id = ps.id AND org.phase = 'ORGANIZE'
@@ -268,8 +266,6 @@ DATASET_QUERIES = {
                pa.started_at, pa.completed_at, pa.accuracy, pa.duration_seconds
         FROM practice_attempts pa
         JOIN practice_sets ps ON ps.id = pa.practice_set_id
-        JOIN research_consent rc ON rc.user_id = pa.user_id AND rc.research_allowed
-             AND pa.started_at >= rc.activity_scope_start_at
         LEFT JOIN curriculum_units cu ON cu.id = ps.curriculum_unit_id
         WHERE pa.started_at >= :start_at AND pa.started_at < :end_at
         ORDER BY pa.started_at, pa.id
@@ -279,21 +275,29 @@ DATASET_QUERIES = {
         SELECT ms.user_id, ms.id AS snapshot_id, c.code AS concept_code,
                ms.mastery_score, ms.captured_at
         FROM mastery_snapshots ms
-        JOIN research_consent rc ON rc.user_id = ms.user_id AND rc.research_allowed
-             AND ms.captured_at >= rc.activity_scope_start_at
         JOIN concepts c ON c.id = ms.concept_id
         WHERE ms.captured_at >= :start_at AND ms.captured_at < :end_at
         ORDER BY ms.captured_at, ms.id
         LIMIT :limit OFFSET :offset
     """,
     "linkage": """
-        SELECT rc.user_id, u.email, rc.survey_response_ref, rc.survey_version,
-               rc.consented_at, rc.activity_scope_start_at
-        FROM research_consent rc
-        JOIN users u ON u.id = rc.user_id
-        WHERE rc.research_allowed AND rc.consented_at >= :start_at
-              AND rc.consented_at < :end_at
-        ORDER BY rc.consented_at, rc.user_id
+        SELECT u.id AS user_id, u.email
+        FROM users u
+        JOIN (
+            SELECT user_id FROM learning_events
+            WHERE created_at >= :start_at AND created_at < :end_at
+            UNION
+            SELECT ps.user_id FROM power_sessions ps
+            JOIN learning_sessions ls ON ls.id = ps.learning_session_id
+            WHERE ls.started_at >= :start_at AND ls.started_at < :end_at
+            UNION
+            SELECT user_id FROM practice_attempts
+            WHERE started_at >= :start_at AND started_at < :end_at
+            UNION
+            SELECT user_id FROM mastery_snapshots
+            WHERE captured_at >= :start_at AND captured_at < :end_at
+        ) activity ON activity.user_id = u.id
+        ORDER BY u.id
         LIMIT :limit OFFSET :offset
     """,
 }
@@ -336,6 +340,7 @@ def export_research_csv(
         "filters": json.dumps({
             "start_at": start_at.isoformat(), "end_at": end_at.isoformat(),
             "limit": limit, "offset": offset,
+            "scope": "all_recorded_activity",
         }),
     })
     db.commit()

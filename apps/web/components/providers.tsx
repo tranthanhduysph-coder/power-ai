@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { AuthProvider } from "./auth-provider";
 import { LanguageProvider, useLanguage } from "./language-provider";
+import { ResearchDataNotice } from "./research-data-notice";
 
 type ThemeMode = "light" | "dark";
 
@@ -247,6 +248,7 @@ function ExperienceEnhancements({ children }: { children: React.ReactNode }) {
               POWER-AI-WEB sẽ tiếp tục cải tiến chất lượng nội dung và hệ thống phản hồi dựa trên quá
               trình thử nghiệm và sử dụng thực tế.
             </p>
+            <ResearchDataNotice language={language} />
           </section>
         </div>
       )}

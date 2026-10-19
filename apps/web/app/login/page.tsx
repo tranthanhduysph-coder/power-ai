@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { auth } from "@/lib/firebase";
+import { ResearchDataNotice } from "@/components/research-data-notice";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -45,6 +46,7 @@ export default function LoginPage() {
         <div className="auth-brand"><span className="brand-mark">P</span><strong>POWER-AI-WEB</strong></div>
         <h1>Welcome back</h1>
         <p className="muted">Learn Biology with a structured POWER workflow.</p>
+        <ResearchDataNotice compact />
         <button className="button secondary full" onClick={googleLogin}>Continue with Google</button>
         <div className="divider"><span>or</span></div>
         <form onSubmit={emailLogin} className="form-stack">
@@ -54,7 +56,7 @@ export default function LoginPage() {
           <button className="button primary full" type="submit">Sign in</button>
         </form>
         <p className="auth-foot">No account? <Link href="/register">Create one</Link></p>
-        <p className="auth-legal">© 2026 Trần Thanh Duy · <Link href="/legal">Copyright & open source</Link></p>
+        <p className="auth-legal">© 2026 Trần Thanh Duy · <Link href="/legal">Terms, data & copyright</Link></p>
       </div>
     </div>
   );
