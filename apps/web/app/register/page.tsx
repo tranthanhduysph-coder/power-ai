@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { auth } from "@/lib/firebase";
+import { ResearchDataNotice } from "@/components/research-data-notice";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -32,6 +33,7 @@ export default function RegisterPage() {
       <div className="auth-card">
         <div className="auth-brand"><span className="brand-mark">P</span><strong>POWER-AI-WEB</strong></div>
         <h1>Create account</h1>
+        <ResearchDataNotice compact />
         <form onSubmit={submit} className="form-stack">
           <label>Full name<input value={name} onChange={(e) => setName(e.target.value)} required /></label>
           <label>Email<input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required /></label>
@@ -41,7 +43,7 @@ export default function RegisterPage() {
           <button className="button primary full" type="submit">Create account</button>
         </form>
         <p className="auth-foot">Already registered? <Link href="/login">Sign in</Link></p>
-        <p className="auth-legal">© 2026 Trần Thanh Duy · <Link href="/legal">Copyright & open source</Link></p>
+        <p className="auth-legal">© 2026 Trần Thanh Duy · <Link href="/legal">Terms, data & copyright</Link></p>
       </div>
     </div>
   );

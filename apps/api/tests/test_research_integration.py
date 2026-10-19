@@ -51,7 +51,7 @@ def case(monkeypatch, local_engine):
     with engine.connect() as conn:
         tx = conn.begin()
         db = Session(bind=conn, join_transaction_mode="create_savepoint")
-        # Existing checkpoint accounts must never become eligible for a test export.
+        # Use a fresh synthetic database; never import real learner data for export tests.
         assert db.scalar(text("SELECT count(*) FROM research_consent")) == 0
         ids = [uuid4() for _ in range(4)]
         for i, uid in enumerate(ids):
@@ -119,30 +119,69 @@ def seed_activity(case):
 
 
 @pytest.mark.parametrize("dataset", research.DATASETS)
-def test_all_datasets_consent_scope_withdrawal_and_audit(case, dataset):
+def test_all_datasets_include_all_activity_independent_of_legacy_consent(case, dataset):
     seed_activity(case)
     assert consent(case).status_code == 200
     assert consent(case, who=2, research_allowed=False, improvement_allowed=True).status_code == 200
-    # who=3 has no decision. Neither product consent nor login permits research.
+    # who=3 has no Form record; all three learners and pre-consent activity export.
     response = exported(case, dataset)
     rows = records(response)
-    assert len(rows) == 1
-    assert rows[0]["participant_id"] == research._participant_id(case.ids[1])
+    expected_count = 6 if dataset == "events" else 3
+    assert len(rows) == expected_count
+    assert {row["participant_id"] for row in rows} == {
+        research._participant_id(case.ids[i]) for i in (1, 2, 3)
+    }
     assert response.headers["cache-control"] == "no-store"
     if dataset != "linkage":
         assert "email" not in rows[0]
         assert all(str(uid) not in response.text for uid in case.ids)
         assert "PRIVATE-SENTINEL" not in response.text
         if dataset == "events":
-            assert rows[0]["smart_score"] == "0.8"
-            assert rows[0]["readiness"] == ""
+            assert all(row["smart_score"] == "0.8" for row in rows)
+            assert all(row["readiness"] == "" for row in rows)
+            assert len(records(exported(case, dataset, start_at=T0.isoformat()))) == 3
     else:
-        assert rows[0]["email"] == "test-1@example.invalid"
-    audit = case.db.execute(text("SELECT dataset,rows_exported FROM research_export_audit")).one()
-    assert tuple(audit) == (dataset, 1)
+        assert {row["email"] for row in rows} == {f"test-{i}@example.invalid" for i in (1, 2, 3)}
+        assert set(rows[0]) == {"participant_id", "email"}
+    audit = case.db.execute(text("SELECT dataset,rows_exported,filters FROM research_export_audit ORDER BY id LIMIT 1")).one()
+    assert audit.dataset == dataset
+    assert audit.rows_exported == expected_count
+    assert audit.filters["scope"] == "all_recorded_activity"
+    # Historical Form choices are retained, but are no longer export filters.
     assert consent(case, when=T0 + timedelta(hours=1), research_allowed=False).status_code == 200
-    assert records(exported(case, dataset)) == []
+    assert len(records(exported(case, dataset))) == expected_count
     assert case.db.scalar(text("SELECT count(*) FROM research_consent_audit WHERE user_id=:uid"), {"uid": case.ids[1]}) == 2
+
+
+@pytest.mark.parametrize("activity", ["events", "cycles", "assessments", "mastery"])
+def test_linkage_contains_only_users_with_selected_window_activity(case, activity):
+    seed_activity(case)
+    # Remove the other sources so each branch of the participant union is tested.
+    if activity != "events":
+        case.db.execute(text("DELETE FROM learning_events WHERE user_id = ANY(:ids)"), {"ids": case.ids})
+    if activity != "mastery":
+        case.db.execute(text("DELETE FROM mastery_snapshots WHERE user_id = ANY(:ids)"), {"ids": case.ids})
+    if activity != "assessments":
+        case.db.execute(text("DELETE FROM practice_attempts WHERE user_id = ANY(:ids)"), {"ids": case.ids})
+    if activity != "cycles":
+        # Practice sets can retain their optional reference after sessions are removed.
+        case.db.execute(text("UPDATE practice_sets SET power_session_id=NULL WHERE user_id = ANY(:ids)"), {"ids": case.ids})
+        case.db.execute(text("DELETE FROM power_sessions WHERE user_id = ANY(:ids)"), {"ids": case.ids})
+    assert len(records(exported(case, "linkage"))) == 3
+    assert records(exported(case, "linkage", start_at=(T0 + timedelta(days=3)).isoformat(),
+                            end_at=(T0 + timedelta(days=4)).isoformat())) == []
+    # The admin has an account but no activity, so must not appear in linkage.
+    assert all(row["participant_id"] != research._participant_id(case.admin.id)
+               for row in records(exported(case, "linkage")))
+
+
+def test_status_describes_bulk_export_scope(case):
+    seed_activity(case)
+    response = case.client.get("/research/status")
+    assert response.status_code == 200
+    assert response.json()["export_scope"] == "all_recorded_activity"
+    assert response.json()["counts"]["assessment_count"] == 3
+    assert response.json()["counts"]["consented_students"] == 0
 
 
 def test_missing_key_does_not_commit_consent(case):
@@ -180,9 +219,11 @@ def test_duplicate_email_source_and_unverified_authorizations(case):
 
 def test_export_paging_window_and_admin_boundary(case):
     seed_activity(case)
-    assert consent(case).status_code == 200
-    assert len(records(exported(case, "events", limit=1))) == 1
-    assert records(exported(case, "events", limit=1, offset=1)) == []
+    full = records(exported(case, "events"))
+    pages = [records(exported(case, "events", limit=2, offset=n)) for n in (0, 2, 4)]
+    assert sum(pages, []) == full
+    assert len(full) == 6
+    assert records(exported(case, "events", limit=2, offset=6)) == []
     for params in ({"limit": 20001}, {"offset": -1}, {"start_at": "2026-10-10T00:00:00"},
                    {"end_at": T0.isoformat(), "start_at": T0.isoformat()},
                    {"end_at": (T0 + timedelta(days=400)).isoformat()}):
@@ -240,16 +281,14 @@ def test_staging_rejects_database_with_other_learner_accounts(case):
         assert_synthetic_database(case.db, case.admin.firebase_uid)
 
 
-def test_historical_scope_and_linkage_formula_utf8(case):
+def test_linkage_formula_utf8_without_form_record(case):
     seed_activity(case)
-    assert consent(case, activity_scope_start_at=(T0 - timedelta(days=1)).isoformat()).status_code == 422
-    assert consent(case, activity_scope_start_at=(T0 - timedelta(days=1)).isoformat(),
-                   historical_coverage_confirmed=True, survey_response_ref="=FORM-TEST",
-                   survey_version="Đợt thử nghiệm").status_code == 200
-    assert len(records(exported(case, "events"))) == 2
-    row = records(exported(case, "linkage"))[0]
-    assert row["survey_response_ref"] == "'=FORM-TEST"
-    assert row["survey_version"] == "Đợt thử nghiệm"
+    case.db.execute(text("UPDATE users SET email=:email WHERE id=:id"),
+                    {"email": "+họcsinh@example.invalid", "id": case.ids[1]})
+    row = next(row for row in records(exported(case, "linkage"))
+               if row["participant_id"] == research._participant_id(case.ids[1]))
+    assert row["email"] == "'+họcsinh@example.invalid"
+    assert case.db.scalar(text("SELECT count(*) FROM research_consent")) == 0
 
 
 @pytest.mark.parametrize("shared_source", [False, True])
