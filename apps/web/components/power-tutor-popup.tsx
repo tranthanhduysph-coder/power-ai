@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { PowerTutorRenderer, type PowerTutorBlock } from "./power-tutor-renderer";
+import { useTutorPosition } from "./use-tutor-position";
 
 export type TutorPhase = "PREPARE" | "ORGANIZE" | "WORK" | "EVALUATE" | "RETHINK";
 export type TutorFeedbackRequest = { id: number; sessionId: string; phase: TutorPhase; message: string };
@@ -20,6 +21,7 @@ export function PowerTutorPopup({ sessionId, phase, language, conceptCode, feedb
   const vi = language === "vi";
   const threadKey = `${sessionId}:${phase}`;
   const [open, setOpen] = useState(false);
+  const position = useTutorPosition(open);
   const [threads, setThreads] = useState<Record<string, Turn[]>>({});
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [attachments, setAttachments] = useState<Record<string, Attachment | undefined>>({});
@@ -127,13 +129,26 @@ export function PowerTutorPopup({ sessionId, phase, language, conceptCode, feedb
         : [vi ? "Giải thích đơn giản hơn" : "Explain more simply", vi ? "Kiểm tra tôi" : "Quiz me"];
 
   return <div className="power-tutor-widget">
-    <button ref={launcher} type="button" className="power-tutor-launcher" aria-expanded={open} aria-controls="power-tutor-dialog"
-      aria-label={vi ? "Mở POWER Tutor" : "Open POWER Tutor"} onClick={() => open ? close() : setOpen(true)}>
-      <span aria-hidden="true">✦</span> POWER Tutor
+    <span id="power-tutor-move-help" className="sr-only">{vi ? "Kéo để di chuyển, bấm để mở. Có thể dùng các phím mũi tên để di chuyển." : "Drag to move, click to open. Arrow keys also move the Tutor."}</span>
+    <button ref={launcher} type="button" className={`power-tutor-launcher${position.dragging === "launcher" ? " is-dragging" : ""}`} style={position.iconStyle}
+      {...position.dragProps("launcher")} aria-expanded={open} aria-controls="power-tutor-dialog" aria-describedby="power-tutor-move-help"
+      title={vi ? "POWER Tutor · Kéo để di chuyển, bấm để mở" : "POWER Tutor · Drag to move, click to open"}
+      aria-label={vi ? "Mở POWER Tutor" : "Open POWER Tutor"} onClick={() => { if (!position.consumeDragClick()) open ? close() : setOpen(true); }}>
+      <svg viewBox="0 0 64 64" fill="none" aria-hidden="true" focusable="false">
+        <path d="M32 18v-7m0 0c-7 0-10-5-10-7 7 0 10 2 10 7Zm0 0c0-6 4-9 10-9 0 6-4 9-10 9Z" fill="#8ee4af" stroke="#164c3b" strokeWidth="2.5" strokeLinejoin="round" />
+        <rect x="11" y="18" width="42" height="35" rx="14" fill="#dff8eb" stroke="#164c3b" strokeWidth="2.5" />
+        <path d="M11 30H8v11h3m42-11h3v11h-3" stroke="#164c3b" strokeWidth="3" strokeLinecap="round" />
+        <rect x="18" y="25" width="28" height="19" rx="8" fill="#164c3b" />
+        <path d="M24 32v2m16-2v2m-12 3c2 3 6 3 8 0" stroke="#b5f7cd" strokeWidth="2.5" strokeLinecap="round" />
+        <circle cx="20" cy="45" r="3" fill="#ffb4a5" /><circle cx="44" cy="45" r="3" fill="#ffb4a5" />
+        <path d="m53 6 1.5 4.5L59 12l-4.5 1.5L53 18l-1.5-4.5L47 12l4.5-1.5L53 6Z" fill="#ffdc72" />
+      </svg>
     </button>
     {open && <section id="power-tutor-dialog" className="power-tutor-popup" role="dialog" aria-modal="false" aria-labelledby="power-tutor-title"
+      style={position.popupStyle}
       onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); close(); } }}>
-      <header className="power-tutor-popup-head">
+      <header className={`power-tutor-popup-head${position.dragging === "popup" ? " is-dragging" : ""}`} {...position.dragProps("popup")} tabIndex={0}
+        aria-label={vi ? "Di chuyển cửa sổ POWER Tutor" : "Move POWER Tutor window"} aria-describedby="power-tutor-move-help">
         <div><h2 id="power-tutor-title">POWER Tutor</h2><span>{phase} · {vi ? "Cùng bạn tìm lời giải" : "Think it through together"}</span></div>
         <button type="button" aria-label={vi ? "Thu gọn POWER Tutor" : "Minimize POWER Tutor"} onClick={close}>−</button>
       </header>
