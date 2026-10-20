@@ -5,6 +5,7 @@ Each test rolls back even when the endpoint commits its own transaction.
 """
 import csv
 import io
+import json
 import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -18,7 +19,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
-from app.api import health, research
+from app.api import health, research, power, tutor
 from app.core.auth import CurrentUser, get_current_user
 from app.db.session import get_db
 from app.services.mastery import update_mastery
@@ -67,6 +68,8 @@ def case(monkeypatch, local_engine):
             "uid": admin.firebase_uid, "email": admin.email, "email_verified": True})
         app = FastAPI()
         app.include_router(research.router)
+        app.include_router(power.router)
+        app.include_router(tutor.router)
         app.dependency_overrides[get_db] = lambda: db
         app.dependency_overrides[get_current_user] = lambda: admin
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -338,3 +341,80 @@ def test_concurrent_consent_imports(local_engine, monkeypatch, shared_source):
                 conn.execute(text("DELETE FROM research_consent WHERE user_id=:uid"), {"uid": uid})
             for uid in ids:
                 conn.execute(text("DELETE FROM users WHERE id=:uid"), {"uid": uid})
+
+
+def seed_review_cycles(case):
+    subject = case.db.scalar(text("INSERT INTO subjects(code,name_vi,name_en) VALUES (:code,'Môn thử','Test subject') RETURNING id"), {"code": f"test-{uuid4()}"})
+    grade = case.db.scalar(text("INSERT INTO grades(subject_id,level,name_vi,name_en) VALUES (:subject,10,'Lớp thử','Test grade') RETURNING id"), {"subject": subject})
+    units = []
+    for _ in range(2):
+        units.append(case.db.execute(text("""INSERT INTO curriculum_units(subject_id,grade_id,code,name_vi,name_en)
+            VALUES (:subject,:grade,:code,'Bài thử','Test lesson') RETURNING id,code"""),
+            {"subject": subject, "grade": grade, "code": f"test-{uuid4()}"}).one())
+    cycles = []
+    for who, unit, status, phase in ((0, units[0], "completed", "RETHINK"),
+                                      (0, units[1], "active", "WORK"),
+                                      (1, units[0], "completed", "RETHINK")):
+        ls = case.db.scalar(text("""INSERT INTO learning_sessions(user_id,curriculum_unit_id,status,started_at)
+            VALUES (:uid,:unit,:status,:t) RETURNING id"""),
+            {"uid": case.ids[who], "unit": unit.id, "status": status, "t": T0})
+        ps = case.db.scalar(text("""INSERT INTO power_sessions(user_id,learning_session_id,current_phase)
+            VALUES (:uid,:ls,:phase) RETURNING id"""), {"uid": case.ids[who], "ls": ls, "phase": phase})
+        states = {"PREPARE": {"goal": "MY-GOAL", "diagnostic": {"readiness": 0.4, "weak_concepts": ["TEST-CONCEPT"]}},
+                  "ORGANIZE": {"synthesis": "MY-MAP"}, "WORK": {"responses": {"W1": "MY-SAVED-ANSWER"}}}
+        for saved_phase, state in states.items():
+            case.db.execute(text("""INSERT INTO power_phase_state(power_session_id,phase,state_json,completed_at)
+                VALUES (:id,:phase,CAST(:state AS jsonb),:t)"""),
+                {"id": ps, "phase": saved_phase, "state": json.dumps(state), "t": T0})
+        cycles.append((str(ps), unit.code))
+    return cycles
+
+
+def test_cycle_history_lists_own_units_pages_and_reads_saved_phases(case):
+    cycles = seed_review_cycles(case)
+    before = case.db.scalar(text("SELECT count(*) FROM power_sessions"))
+    response = case.client.get("/power/sessions/history", params={"summary": "true", "limit": 1})
+    assert response.status_code == 200
+    first = response.json()
+    assert first["has_more"] is True and first["next_offset"] == 1
+    second = case.client.get("/power/sessions/history", params={"summary": "true", "limit": 1, "offset": 1}).json()
+    assert second["has_more"] is False and second["next_offset"] is None
+    own = first["sessions"] + second["sessions"]
+    assert {item["id"] for item in own} == {cycles[0][0], cycles[1][0]}
+    assert all(item["completed_phases"] == 3 for item in own)
+    assert all("phases" not in item for item in own)
+    selected = case.client.get("/power/sessions/history", params={"unit_code": cycles[0][1]}).json()
+    assert [item["id"] for item in selected["sessions"]] == [cycles[0][0]]
+    reopened = case.client.get(f"/power/sessions/{cycles[0][0]}").json()
+    assert reopened["phases"]["WORK"]["state"]["responses"]["W1"] == "MY-SAVED-ANSWER"
+    assert reopened["status"] == "completed" and reopened["current_phase"] == "RETHINK"
+    assert case.db.scalar(text("SELECT count(*) FROM power_sessions")) == before
+    assert case.client.get(f"/power/sessions/{cycles[2][0]}").status_code == 404
+
+
+def test_history_rejects_invalid_pagination(case):
+    for params in ({"offset": -1}, {"limit": 26}):
+        assert case.client.get("/power/sessions/history", params=params).status_code == 422
+
+
+def test_tutor_context_and_conversation_are_owned_and_not_logged_as_history(case, monkeypatch):
+    cycles = seed_review_cycles(case)
+    captured = []
+    monkeypatch.setattr(tutor, "search_chunks", lambda *args, **kwargs: [])
+    monkeypatch.setattr(tutor, "grounded_tutor_blocks", lambda **kwargs:
+                        (captured.append(kwargs) or ("mock", [{"type": "text", "content": "A guiding hint"}])))
+    payload = {"power_session_id": cycles[0][0], "phase": "WORK", "message": "CURRENT-UNSAVED-ANSWER",
+               "concept_code": "TEST", "conversation": [{"role": "assistant", "content": "PREVIOUS-TURN-SENTINEL"}]}
+    response = case.client.post("/tutor/respond", json=payload)
+    assert response.status_code == 200
+    context = captured[0]["learner_context"]
+    assert context["goal"] == "MY-GOAL" and context["readiness"] == 0.4
+    assert context["organize_map"]["synthesis"] == "MY-MAP"
+    assert context["work_evidence"]["responses"]["W1"] == "MY-SAVED-ANSWER"
+    assert captured[0]["message"] == "CURRENT-UNSAVED-ANSWER"
+    assert captured[0]["conversation"] == payload["conversation"]
+    event = case.db.scalar(text("SELECT payload::text FROM learning_events WHERE event_type='tutor_asked'"))
+    assert "PREVIOUS-TURN-SENTINEL" not in event
+    payload["power_session_id"] = cycles[2][0]
+    assert case.client.post("/tutor/respond", json=payload).status_code == 404
+    assert len(captured) == 1

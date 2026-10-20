@@ -1,13 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { AuthGuard } from "@/components/auth-guard";
 import { useAuth } from "@/components/auth-provider";
 import { useLanguage } from "@/components/language-provider";
-import { PowerTutorRenderer, type PowerTutorBlock } from "@/components/power-tutor-renderer";
+import { PowerTutorPopup, type TutorFeedbackRequest } from "@/components/power-tutor-popup";
 import { apiFetch } from "@/lib/api";
 
 const phases = ["PREPARE", "ORGANIZE", "WORK", "EVALUATE", "RETHINK"] as const;
@@ -227,6 +227,12 @@ export default function LearnPage() {
   const unitCode = decodeURIComponent(params.unitCode || "B12_DNA_REPLICATION");
   const { language } = useLanguage();
   const { user, devMode, loading: authLoading } = useAuth();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const requestedSessionId = searchParams.get("session");
+  const feedbackSequence = useRef(0);
+  const [tutorRequest, setTutorRequest] = useState<TutorFeedbackRequest | null>(null);
+  const [tutorBusy, setTutorBusy] = useState(false);
   const [unitDetail, setUnitDetail] = useState<UnitDetail | null>(null);
   const [session, setSession] = useState<PowerSession | null>(null);
   const [blueprint, setBlueprint] = useState<PrepareBlueprint | null>(null);
@@ -257,16 +263,9 @@ export default function LearnPage() {
   const [actionPlan, setActionPlan] = useState("");
   const [rethinkConfidence, setRethinkConfidence] = useState(3);
   const [confirmedMisconceptions, setConfirmedMisconceptions] = useState<string[]>([]);
-  const [message, setMessage] = useState("");
-  const [blocks, setBlocks] = useState<PowerTutorBlock[]>([]);
   const [busy, setBusy] = useState(false);
   const [sessionBusy, setSessionBusy] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
-  const [tutorProvider, setTutorProvider] = useState<string | null>(null);
-  const [retrievalCount, setRetrievalCount] = useState<number | null>(null);
-  const [attachedImage, setAttachedImage] = useState<{ name: string; dataUrl: string } | null>(null);
-  const [generatedImage, setGeneratedImage] = useState<string | null>(null);
-  const [imageBusy, setImageBusy] = useState(false);
 
   const hydratePowerSession = (ps: PowerSession) => {
     setSession(ps);
@@ -297,11 +296,6 @@ export default function LearnPage() {
     setActionPlan(rethinkState.action_plan || "");
     setRethinkConfidence(rethinkState.confidence_after_rethink || 3);
     setConfirmedMisconceptions(rethinkState.confirmed_misconceptions || []);
-    setBlocks([]);
-    setTutorProvider(null);
-    setRetrievalCount(null);
-    setAttachedImage(null);
-    setGeneratedImage(null);
   };
 
   const loadRethinkBlueprint = async (sessionId: string) => {
@@ -326,12 +320,15 @@ export default function LearnPage() {
           apiFetch<PrepareBlueprint>(`/power/prepare/blueprint?unit_code=${encodeURIComponent(unitCode)}&language=${language}`),
           apiFetch<OrganizeBlueprint>(`/power/organize/blueprint?unit_code=${encodeURIComponent(unitCode)}&language=${language}`),
           apiFetch<WorkBlueprint>(`/power/work/blueprint?unit_code=${encodeURIComponent(unitCode)}&language=${language}`),
-          apiFetch<PowerSession>("/power/sessions", {
-            method: "POST",
-            body: JSON.stringify({ unit_code: unitCode, language }),
-          }),
+          requestedSessionId !== null
+            ? apiFetch<PowerSession>(`/power/sessions/${encodeURIComponent(requestedSessionId)}`)
+            : apiFetch<PowerSession>("/power/sessions", {
+              method: "POST",
+              body: JSON.stringify({ unit_code: unitCode, language }),
+            }),
         ]);
         if (cancelled) return;
+        if (ps.unit.code !== unitCode) throw new Error(language === "vi" ? "Chu trình này thuộc bài học khác. Hãy mở lại từ Tiến trình." : "This cycle belongs to another lesson. Open it from Progress.");
         setUnitDetail(detail);
         setBlueprint(bp);
         setOrganizeBlueprint(obp);
@@ -339,16 +336,16 @@ export default function LearnPage() {
         hydratePowerSession(ps);
         await loadRethinkBlueprint(ps.id);
         const history = await apiFetch<{ sessions: PowerSession[] }>(`/power/sessions/history?unit_code=${encodeURIComponent(unitCode)}&limit=10`);
-        if (!cancelled) setSessionHistory(history.sessions);
+        if (!cancelled) setSessionHistory(history.sessions.some(item => item.id === ps.id) ? history.sessions : [ps, ...history.sessions]);
       } catch (error) {
-        if (!cancelled) setNotice(error instanceof Error ? error.message : "Unable to load POWER session");
+        if (!cancelled) { setSession(null); setNotice(error instanceof Error ? error.message : "Unable to load POWER session"); }
       } finally {
         if (!cancelled) setSessionBusy(false);
       }
     };
     load();
     return () => { cancelled = true; };
-  }, [authLoading, devMode, user, language, unitCode]);
+  }, [authLoading, devMode, user, language, unitCode, requestedSessionId]);
 
   const diagnosticComplete = useMemo(() => {
     if (!blueprint) return false;
@@ -537,90 +534,9 @@ export default function LearnPage() {
     }
   };
 
-  const attachTutorImage = (file: File | null) => {
-    if (!file) return;
-    const allowed = ["image/png", "image/jpeg", "image/webp"];
-    if (!allowed.includes(file.type)) {
-      setNotice(language === "vi" ? "Chỉ hỗ trợ ảnh PNG, JPEG hoặc WebP." : "Only PNG, JPEG, or WebP images are supported.");
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      setNotice(language === "vi" ? "Ảnh phải nhỏ hơn hoặc bằng 5 MB." : "The image must be 5 MB or smaller.");
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        setAttachedImage({ name: file.name, dataUrl: reader.result });
-        setNotice(null);
-      }
-    };
-    reader.onerror = () => setNotice(language === "vi" ? "Không đọc được ảnh." : "Unable to read the image.");
-    reader.readAsDataURL(file);
-  };
-
-  const askTutor = async () => {
-    if ((!message.trim() && !attachedImage) || !session) return;
-    setBusy(true);
-    setNotice(null);
-    try {
-      const tutorMessage = message.trim() || (language === "vi" ? "Hãy phân tích hình ảnh Sinh học này và giúp tôi hiểu nó." : "Analyze this Biology image and help me understand it.");
-      const res = await apiFetch<{ provider: string; phase: Phase; blocks: PowerTutorBlock[]; retrieval: { count: number } }>("/tutor/respond", {
-        method: "POST",
-        body: JSON.stringify({
-          concept_code: unitDetail?.primary_concept_code || undefined,
-          message: tutorMessage,
-          language,
-          power_session_id: session.id,
-          phase: viewPhase,
-          image_data_url: attachedImage?.dataUrl || null,
-        }),
-      });
-      setBlocks(res.blocks);
-      setTutorProvider(res.provider);
-      setRetrievalCount(res.retrieval?.count ?? 0);
-      setAttachedImage(null);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Unable to ask POWER Tutor");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const generateTutorImage = async () => {
-    if (!message.trim() || !session) return;
-    setImageBusy(true);
-    setNotice(null);
-    try {
-      const res = await apiFetch<{ provider: string; model: string; phase: Phase; image_data_url: string; retrieval: { count: number } }>("/tutor/generate-image", {
-        method: "POST",
-        body: JSON.stringify({
-          concept_code: unitDetail?.primary_concept_code || undefined,
-          prompt: message.trim(),
-          language,
-          power_session_id: session.id,
-          phase: viewPhase,
-        }),
-      });
-      setGeneratedImage(res.image_data_url);
-      setTutorProvider(res.provider);
-      setRetrievalCount(res.retrieval?.count ?? 0);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Unable to generate image");
-    } finally {
-      setImageBusy(false);
-    }
-  };
-
-
   const openPhase = (target: Phase) => {
     if (!session?.phases?.[target] && target !== phase) return;
     setViewPhase(target);
-    setBlocks([]);
-    setTutorProvider(null);
-    setRetrievalCount(null);
-    setAttachedImage(null);
-    setGeneratedImage(null);
     setNotice(target === phase
       ? null
       : (language === "vi" ? `Bạn đang xem lại pha ${target}. Tiến trình hiện tại vẫn ở ${phase}.` : `You are reviewing ${target}. Your current progression remains at ${phase}.`));
@@ -635,8 +551,7 @@ export default function LearnPage() {
         method: "POST",
         body: JSON.stringify({ unit_code: unitCode, language, force_new: true }),
       });
-      hydratePowerSession(ps);
-      await loadRethinkBlueprint(ps.id);
+      router.push(`/learn/${encodeURIComponent(unitCode)}?session=${encodeURIComponent(ps.id)}`);
       const history = await apiFetch<{ sessions: PowerSession[] }>(`/power/sessions/history?unit_code=${encodeURIComponent(unitCode)}&limit=10`);
       setSessionHistory(history.sessions);
       setNotice(language === "vi" ? "Đã bắt đầu một chu trình POWER mới từ Prepare." : "Started a new POWER cycle from Prepare.");
@@ -647,21 +562,9 @@ export default function LearnPage() {
     }
   };
 
-  const switchSession = async (sessionId: string) => {
+  const switchSession = (sessionId: string) => {
     if (!sessionId || sessionId === session?.id) return;
-    setSessionBusy(true);
-    try {
-      const ps = await apiFetch<PowerSession>(`/power/sessions/${sessionId}`);
-      hydratePowerSession(ps);
-      await loadRethinkBlueprint(ps.id);
-      setNotice(ps.status === "completed"
-        ? (language === "vi" ? "Đang xem một chu trình POWER đã hoàn thành." : "Viewing a completed POWER cycle.")
-        : null);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Unable to open POWER cycle");
-    } finally {
-      setSessionBusy(false);
-    }
+    router.push(`/learn/${encodeURIComponent(unitCode)}?session=${encodeURIComponent(sessionId)}`);
   };
 
   const phaseDone = (p: Phase) => Boolean(session?.phases?.[p]?.completed_at);
@@ -844,6 +747,7 @@ export default function LearnPage() {
         <span className="pill">{language === "vi" ? `${workTaskStatus.complete}/${workTaskStatus.total} bằng chứng` : `${workTaskStatus.complete}/${workTaskStatus.total} evidence tasks`}</span>
       </div>
       <p className="muted">{workBlueprint?.intro}</p>
+      <p className="muted">{language === "vi" ? "Các nhiệm vụ cốt lõi bám theo bài học. POWER Tutor dùng mục tiêu, kết quả Prepare, sơ đồ Organize đã lưu và câu trả lời hiện tại để gợi ý phù hợp với bạn." : "Core tasks follow the lesson. POWER Tutor uses your saved goal, Prepare results, Organize map and current answer to tailor its guidance."}</p>
 
       <div className="work-progress" aria-label={language === "vi" ? "Tiến độ Work" : "Work progress"}>
         <div style={{ width: `${workTaskStatus.total ? (workTaskStatus.complete / workTaskStatus.total) * 100 : 0}%` }} />
@@ -874,9 +778,13 @@ export default function LearnPage() {
             <button
               type="button"
               className="button secondary tutor-task-button"
-              onClick={() => setMessage(language === "vi"
-                ? `Tôi đang làm ${task.title}. Nhiệm vụ: ${task.prompt}\n\nCâu trả lời hiện tại của tôi: ${value || "(chưa viết)"}\n\nHãy phản hồi bằng gợi ý và câu hỏi dẫn dắt, đừng viết đáp án hoàn chỉnh thay tôi.`
-                : `I am working on ${task.title}. Task: ${task.prompt}\n\nMy current response: ${value || "(not written yet)"}\n\nGive me hints and guiding questions; do not write the full answer for me.`)}
+              disabled={busy || tutorBusy || !session}
+              onClick={() => session && setTutorRequest({
+                id: ++feedbackSequence.current, sessionId: session.id, phase: "WORK",
+                message: language === "vi"
+                  ? `Tôi đang làm ${task.title}. Nhiệm vụ: ${task.prompt}\n\nCâu trả lời hiện tại của tôi: ${value || "(chưa viết)"}\n\nHãy phản hồi bằng gợi ý và câu hỏi dẫn dắt, đừng viết đáp án hoàn chỉnh thay tôi.`
+                  : `I am working on ${task.title}. Task: ${task.prompt}\n\nMy current response: ${value || "(not written yet)"}\n\nGive me hints and guiding questions; do not write the full answer for me.`,
+              })}
             >{language === "vi" ? "Nhờ POWER Tutor phản hồi" : "Ask POWER Tutor for feedback"}</button>
           </section>;
         })}
@@ -1025,22 +933,15 @@ export default function LearnPage() {
     </article>;
   };
 
-  const quickActions = viewPhase === "PREPARE"
-    ? [language === "vi" ? "Hỏi tôi một câu kiến thức nền" : "Ask me one prior-knowledge question", language === "vi" ? "Giúp tôi làm rõ mục tiêu" : "Help clarify my goal"]
-    : viewPhase === "ORGANIZE"
-      ? [language === "vi" ? "Gợi ý quan hệ giữa các khái niệm" : "Suggest concept relationships", language === "vi" ? "Cho tôi một bảng so sánh" : "Give me a comparison table"]
-      : viewPhase === "RETHINK"
-        ? [language === "vi" ? "Giúp tôi tìm nguyên nhân sai" : "Help identify why I was wrong", language === "vi" ? "Hỏi tôi một câu phản tư" : "Ask me a reflection question"]
-        : [language === "vi" ? "Giải thích đơn giản hơn" : "Explain more simply", language === "vi" ? "So sánh hai khái niệm" : "Compare two concepts", language === "vi" ? "Kiểm tra tôi" : "Quiz me"];
-
   return (
     <AuthGuard>
       <AppShell>
         <div className="page-heading">
           <div><p className="eyebrow">{language === "vi" ? `Sinh học ${unitDetail?.grade ?? ""}` : `Biology ${unitDetail?.grade ?? ""}`} · POWER learning cycle</p><h1>{unitDetail ? (language === "vi" ? unitDetail.name_vi : unitDetail.name_en) : blueprint?.title}</h1>{unitDetail?.printed_page_start && <p className="muted">{language === "vi" ? `SGK: trang ${unitDetail.printed_page_start}${unitDetail.printed_page_end && unitDetail.printed_page_end !== unitDetail.printed_page_start ? `–${unitDetail.printed_page_end}` : ""}` : `Textbook: pp. ${unitDetail.printed_page_start}${unitDetail.printed_page_end && unitDetail.printed_page_end !== unitDetail.printed_page_start ? `–${unitDetail.printed_page_end}` : ""}`}</p>}</div>
           <div className="cycle-controls">
+            <Link className="button secondary inline" href="/progress#power-history">{language === "vi" ? "Tất cả chu trình đã học" : "All learning cycles"}</Link>
             {sessionHistory.length > 1 && <select aria-label={language === "vi" ? "Chọn chu trình POWER" : "Choose POWER cycle"} value={session?.id || ""} onChange={(e) => switchSession(e.target.value)}>
-              {sessionHistory.map((item, index) => <option key={item.id} value={item.id}>{language === "vi" ? `Chu trình ${sessionHistory.length - index}` : `Cycle ${sessionHistory.length - index}`} · {item.status === "completed" ? (language === "vi" ? "đã hoàn thành" : "completed") : (language === "vi" ? "đang học" : "active")}</option>)}
+              {sessionHistory.map((item) => <option key={item.id} value={item.id}>{item.created_at ? new Date(item.created_at).toLocaleString(language === "vi" ? "vi-VN" : "en-US") : (language === "vi" ? "Chu trình" : "Cycle")} · {item.status === "completed" ? (language === "vi" ? "đã hoàn thành" : "completed") : (language === "vi" ? "đang học" : "active")}</option>)}
             </select>}
             {session?.status === "completed" && <button className="button secondary inline" disabled={busy} onClick={startNewCycle}>{language === "vi" ? "Bắt đầu chu trình mới" : "Start new cycle"}</button>}
           </div>
@@ -1054,38 +955,16 @@ export default function LearnPage() {
         {viewPhase !== phase && <div className="review-banner">{language === "vi" ? `Chế độ xem lại: ${viewPhase}. Pha tiến trình hiện tại là ${phase}; việc xem lại không làm lùi tiến trình.` : `Review mode: ${viewPhase}. Current progression is ${phase}; reviewing does not move progress backward.`}</div>}
         {session?.status === "completed" && <div className="review-banner complete-cycle">{language === "vi" ? "Chu trình này đã hoàn thành. Bạn có thể bấm P–O–W–E–R để xem lại từng pha, chỉnh sửa Prepare/Organize, hoặc bắt đầu một chu trình mới." : "This cycle is complete. Use P–O–W–E–R to review each phase, edit Prepare/Organize, or start a new cycle."}</div>}
         {notice && <div className="notice-banner">{notice}</div>}
-        {sessionBusy ? <div className="card loading-card">{language === "vi" ? "Đang mở phiên POWER…" : "Opening POWER session…"}</div> : <div className="lesson-layout">
+        {sessionBusy ? <div className="card loading-card">{language === "vi" ? "Đang mở phiên POWER…" : "Opening POWER session…"}</div> : !session ? <section className="card loading-card"><p>{language === "vi" ? "Không thể mở chu trình này. Hãy chọn lại trong Tiến trình." : "Unable to open this cycle. Choose it again from Progress."}</p><Link className="button secondary inline" href="/progress#power-history">{language === "vi" ? "Mở Tiến trình" : "Open Progress"}</Link></section> : <div className="lesson-layout">
           {viewPhase === "PREPARE" && renderPrepare()}
           {viewPhase === "ORGANIZE" && renderOrganize()}
           {viewPhase === "WORK" && renderWork()}
           {viewPhase === "EVALUATE" && renderEvaluate()}
           {viewPhase === "RETHINK" && renderRethink()}
-          <aside className="tutor-card">
-            <div className="tutor-header"><div><span className="pill">POWER Tutor · {viewPhase}</span><h3>{language === "vi" ? "Hỗ trợ đúng pha học tập" : "Phase-aware learning support"}</h3></div></div>
-            {tutorProvider && <div><span className="pill">{tutorProvider === "openai" ? "OpenAI" : "Mock"}</span> <span className="muted">{language === "vi" ? `Retrieval: ${retrievalCount ?? 0} đoạn` : `Retrieval: ${retrievalCount ?? 0} chunks`}</span></div>}
-            {tutorProvider === "mock" && <p className="muted">{language === "vi" ? "Tutor đang chạy mock mode. Hãy dùng AI_PROVIDER=openai để kiểm thử Tutor thật." : "Tutor is running in mock mode. Use AI_PROVIDER=openai to test the real Tutor."}</p>}
-            <div className="quick-actions">{quickActions.map((x) => <button key={x} onClick={() => setMessage(x)}>{x}</button>)}</div>
-            <div className="quick-actions">
-              <label className="button secondary" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                {language === "vi" ? "Đính kèm ảnh" : "Attach image"}
-                <input type="file" accept="image/png,image/jpeg,image/webp" style={{ display: "none" }} onChange={(e) => attachTutorImage(e.target.files?.[0] || null)} />
-              </label>
-              <button type="button" className="button secondary" disabled={!message.trim() || !session || imageBusy} onClick={generateTutorImage}>
-                {imageBusy ? "…" : (language === "vi" ? "Tạo hình minh họa" : "Generate illustration")}
-              </button>
-            </div>
-            {attachedImage && <div className="review-banner" style={{ margin: "0 0 12px" }}>
-              <strong>{language === "vi" ? "Ảnh đã đính kèm:" : "Attached image:"}</strong> {attachedImage.name}
-              <button type="button" className="text-button" style={{ marginLeft: 10 }} onClick={() => setAttachedImage(null)}>{language === "vi" ? "Bỏ ảnh" : "Remove"}</button>
-            </div>}
-            {blocks.length > 0 && <PowerTutorRenderer blocks={blocks} />}
-            {generatedImage && <div style={{ marginTop: 12 }}>
-              <img src={generatedImage} alt={language === "vi" ? "Hình minh họa Sinh học do AI tạo" : "AI-generated Biology illustration"} style={{ width: "100%", maxHeight: 320, objectFit: "contain", borderRadius: 12, border: "1px solid var(--line)" }} />
-              <button type="button" className="text-button" style={{ marginTop: 6 }} onClick={() => setGeneratedImage(null)}>{language === "vi" ? "Ẩn hình" : "Hide image"}</button>
-            </div>}
-            <div className="tutor-input"><textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder={language === "vi" ? `Hỏi POWER trong pha ${viewPhase}… Bạn cũng có thể đính kèm ảnh.` : `Ask POWER during ${viewPhase}… You can also attach an image.`} /><button className="button primary" disabled={busy || !session || (!message.trim() && !attachedImage)} onClick={askTutor}>{busy ? "…" : (language === "vi" ? "Gửi" : "Send")}</button></div>
-          </aside>
+
         </div>}
+        {session && !sessionBusy && <PowerTutorPopup key={user?.uid || "local-demo"} sessionId={session.id} phase={viewPhase}
+          conceptCode={unitDetail?.primary_concept_code} language={language} feedbackRequest={tutorRequest} onBusyChange={setTutorBusy} />}
       </AppShell>
     </AuthGuard>
   );
