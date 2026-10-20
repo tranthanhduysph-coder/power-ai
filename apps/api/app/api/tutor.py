@@ -15,13 +15,19 @@ from app.services.tutor import generate_grounded_image, grounded_tutor_blocks
 router = APIRouter(tags=["tutor"])
 
 
+class TutorConversationTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=4000)
+
+
 class TutorRequest(BaseModel):
     concept_code: str | None = None
-    message: str
+    message: str = Field(max_length=24000)
     language: Literal["vi", "en"] = "vi"
     power_session_id: UUID | None = None
     phase: Literal["PREPARE", "ORGANIZE", "WORK", "EVALUATE", "RETHINK"] | None = None
     image_data_url: str | None = Field(default=None, max_length=7_100_000)
+    conversation: list[TutorConversationTurn] = Field(default_factory=list, max_length=8)
 
 
 class TutorImageRequest(BaseModel):
@@ -164,6 +170,7 @@ def tutor_respond(
         phase=phase,
         learner_context=learner_context,
         image_data_url=payload.image_data_url,
+        conversation=[turn.model_dump() for turn in payload.conversation],
     )
     db.execute(
         text("""

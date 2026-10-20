@@ -209,25 +209,41 @@ def active_power_session(
 
 @router.get("/power/sessions/history")
 def power_session_history(
-    unit_code: str = Query(default="B12_DNA_REPLICATION"),
+    unit_code: str | None = Query(default=None),
     limit: int = Query(default=10, ge=1, le=25),
+    offset: int = Query(default=0, ge=0),
+    summary: bool = Query(default=False),
     user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    ids = db.execute(
+    rows = db.execute(
         text("""
-            SELECT ps.id
+            SELECT ps.id, ps.current_phase, ps.created_at, ps.updated_at,
+                   ls.status, cu.code AS unit_code, cu.name_vi, cu.name_en,
+                   (SELECT count(*) FROM power_phase_state state
+                    WHERE state.power_session_id = ps.id AND state.completed_at IS NOT NULL) AS completed_phases
             FROM power_sessions ps
             JOIN learning_sessions ls ON ls.id = ps.learning_session_id
             JOIN curriculum_units cu ON cu.id = ls.curriculum_unit_id
             WHERE ps.user_id = :user_id
-              AND cu.code = :unit_code
-            ORDER BY COALESCE(ls.ended_at, ps.updated_at) DESC, ps.created_at DESC
-            LIMIT :limit
+              AND (CAST(:unit_code AS TEXT) IS NULL OR cu.code = :unit_code)
+            ORDER BY COALESCE(ls.ended_at, ps.updated_at) DESC, ps.created_at DESC, ps.id DESC
+            LIMIT :fetch_limit OFFSET :offset
         """),
-        {"user_id": user.id, "unit_code": unit_code, "limit": limit},
-    ).scalars().all()
-    return {"sessions": [_session_payload(db, session_id, user.id) for session_id in ids]}
+        {"user_id": user.id, "unit_code": unit_code, "fetch_limit": limit + 1, "offset": offset},
+    ).mappings().all()
+    has_more = len(rows) > limit
+    selected = rows[:limit]
+    if summary:
+        sessions = [{
+            "id": str(row["id"]), "current_phase": row["current_phase"],
+            "status": row["status"], "created_at": row["created_at"], "updated_at": row["updated_at"],
+            "completed_phases": row["completed_phases"],
+            "unit": {"code": row["unit_code"], "name_vi": row["name_vi"], "name_en": row["name_en"]},
+        } for row in selected]
+    else:
+        sessions = [_session_payload(db, row["id"], user.id) for row in selected]
+    return {"sessions": sessions, "has_more": has_more, "next_offset": offset + limit if has_more else None}
 
 
 @router.get("/power/sessions/{session_id}")

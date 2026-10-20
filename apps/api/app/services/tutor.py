@@ -68,6 +68,7 @@ def grounded_tutor_blocks(
     phase: str = "WORK",
     learner_context: dict[str, Any] | None = None,
     image_data_url: str | None = None,
+    conversation: list[dict[str, str]] | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
     settings = get_settings()
     if settings.ai_provider != "openai":
@@ -103,7 +104,7 @@ def grounded_tutor_blocks(
         phase_rule = {
             "PREPARE": "The learner is in PREPARE. Clarify prior knowledge and goals; avoid doing the whole lesson for them. Give at most one short explanation, then ask one focused readiness question.",
             "ORGANIZE": "The learner is in ORGANIZE. Use the learner's current organize_map when available. Ask them to justify or refine one relationship at a time; emphasize relationships, categories, sequences, and comparisons. Do not replace their map with a complete ready-made map unless explicitly requested after they have attempted one.",
-            "WORK": "The learner is in WORK. Explain and scaffold the biology clearly, using examples and a brief check-for-understanding when useful.",
+            "WORK": "The learner is in WORK. Tailor hints to their goal, Prepare readiness and weak concepts, Organize map and current attempted answer. Explain and scaffold the biology clearly; ask one useful guiding question rather than completing their task for them.",
             "EVALUATE": "The learner is in EVALUATE. Do not simply reveal answers to an active assessment. Give hints, criteria, or feedback on reasoning instead.",
             "RETHINK": "The learner is in RETHINK. Help the learner identify why an error happened, articulate the corrected idea, and state one concrete adjustment for next time.",
         }.get(phase, "Explain the biology clearly and concisely.")
@@ -118,7 +119,7 @@ def grounded_tutor_blocks(
         phase_rule = {
             "PREPARE": "Người học đang ở PREPARE. Hãy làm rõ kiến thức nền và mục tiêu; không giảng thay toàn bộ bài. Chỉ giải thích rất ngắn khi cần rồi đặt một câu hỏi kiểm tra sẵn sàng học tập.",
             "ORGANIZE": "Người học đang ở ORGANIZE. Nếu learner_context có organize_map, hãy bám vào bản đồ do chính người học đang xây. Yêu cầu họ giải thích hoặc tinh chỉnh từng quan hệ; ưu tiên quan hệ khái niệm, phân loại, trình tự và so sánh. Không thay người học bằng một sơ đồ hoàn chỉnh có sẵn trừ khi họ đã thử xây và chủ động yêu cầu xem mẫu tham khảo.",
-            "WORK": "Người học đang ở WORK. Giải thích và scaffold kiến thức Sinh học rõ ràng, có thể dùng ví dụ và một câu kiểm tra hiểu biết ngắn.",
+            "WORK": "Người học đang ở WORK. Bám vào mục tiêu, mức sẵn sàng và khái niệm yếu ở Prepare, sơ đồ Organize và câu trả lời đang làm để cá nhân hóa gợi ý. Giải thích rõ kiến thức Sinh học và đặt một câu hỏi dẫn dắt phù hợp; không làm trọn nhiệm vụ thay người học.",
             "EVALUATE": "Người học đang ở EVALUATE. Không đưa thẳng đáp án cho một bài đánh giá đang làm; hãy gợi ý, nêu tiêu chí hoặc phản hồi vào lập luận.",
             "RETHINK": "Người học đang ở RETHINK. Giúp xác định vì sao sai, phát biểu lại ý đúng và nêu một điều chỉnh cụ thể cho lần học tiếp theo.",
         }.get(phase, "Giải thích kiến thức Sinh học ngắn gọn, rõ ràng.")
@@ -152,7 +153,11 @@ def grounded_tutor_blocks(
 
     response = client.responses.create(
         model=settings.tutor_model,
-        input=[{"role": "user", "content": content}],
+        input=[*[
+            {"role": turn["role"], "content": turn["content"][:4000]}
+            for turn in (conversation or [])[-8:]
+            if turn.get("role") in ("user", "assistant") and turn.get("content")
+        ], {"role": "user", "content": content}],
     )
     return "openai", [{"type": "text", "content": response.output_text.strip()}]
 
